@@ -3,6 +3,7 @@ const app: Application = express();
 import cors from "cors";
 import router from "./app/routes";
 import notFound from "./app/middlewares/notFound";
+// import { Prisma } from "./generated/prisma/browser";
 
 const corsOptions = {
   origin: [

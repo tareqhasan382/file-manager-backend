@@ -1,0 +1,97 @@
+// generator client {
+//   provider = "prisma-client-js"
+//   output   = "../src/generated/prisma"
+// }
+
+// datasource db {
+//   provider = "postgresql"
+// }
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Plan {
+  FREE
+  SILVER
+  GOLD
+  DIAMOND
+}
+
+model Tenant {
+  id               String   @id @default(uuid())
+  name             String
+  plan             Plan
+  stripeCustomerId String?
+  subscriptionId   String?
+  storageUsed      Int      @default(0) // in MB
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now())
+
+  users   User[]
+  folders Folder[]
+  files   File[]
+
+  @@map("tenants")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  tenantId  String
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("users")
+}
+
+model Folder {
+  id        String   @id @default(uuid())
+  name      String
+  tenantId  String
+  parentId  String?
+  path      String // logical path: /documents/invoices
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  parent   Folder?  @relation("FolderTree", fields: [parentId], references: [id])
+  children Folder[] @relation("FolderTree")
+  files    File[]
+
+  @@index([tenantId])
+  @@map("folders")
+}
+
+model File {
+  id        String   @id @default(uuid())
+  name      String
+  size      Int // in MB
+  mimeType  String
+  url       String // Cloudinary secure_url
+  publicId  String // Cloudinary public_id
+  tenantId  String
+  folderId  String?
+  path      String // same logical path as folder
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  folder Folder? @relation(fields: [folderId], references: [id])
+
+  @@index([tenantId])
+  @@map("files")
+}
