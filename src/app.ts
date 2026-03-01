@@ -1,34 +1,37 @@
 import express, { Application } from "express";
-const app: Application = express();
 import cors from "cors";
 import router from "./app/routes";
 import notFound from "./app/middlewares/notFound";
-// import { Prisma } from "./generated/prisma/browser";
+import { globalErrorHandler } from "./app/middlewares/error.middleware";
 
+const app: Application = express();
+
+/* -------------------- CORS -------------------- */
 const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:3000"
-  ],
+  origin: ["http://localhost:5173", "http://localhost:3000"],
   credentials: true,
-  optionSuccessStatus: 200,
+  optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
 
-//parser
+/* -------------------- Parsers -------------------- */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// Applications route
+
+/* -------------------- Routes -------------------- */
 app.use("/api/v1", router);
-app.get("/", (req, res) => {
-  res.status(200).json({ status: 200, message: " Our server is Running 🚀" });
+
+app.get("/api/v1/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Server is running 🚀",
+  });
 });
 
+/* -------------------- Not Found -------------------- */
 app.use(notFound);
 
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error("Error:", err);
-  res.status(500).json({ error: "Internal server error" });
-});
+/* -------------------- Global Error Handler -------------------- */
+app.use(globalErrorHandler);
 
 export default app;
