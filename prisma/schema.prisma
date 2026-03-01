@@ -31,8 +31,8 @@ model Tenant {
   id               String   @id @default(uuid())
   name             String
   plan             Plan
-  stripeCustomerId String?
-  subscriptionId   String?
+  stripeCustomerId String? @unique
+  subscriptionId   String? @unique
   storageUsed      Int      @default(0) // in MB
   createdAt        DateTime @default(now())
   updatedAt        DateTime @default(now())

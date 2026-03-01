@@ -1,5 +1,8 @@
+import config from ".";
+
 export const STRIPE_PRICES = {
-  SILVER: "price_test_silver",
-  GOLD: "price_test_gold",
-  DIAMOND: "price_test_diamond",
+  FREE: config.stripe.plans.free,
+  SILVER: config.stripe.plans.silver,
+  GOLD: config.stripe.plans.gold,
+  DIAMOND: config.stripe.plans.diamond,
 };
