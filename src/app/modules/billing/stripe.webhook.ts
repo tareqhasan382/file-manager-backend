@@ -3,7 +3,6 @@ import Stripe from "stripe";
 import { stripe } from "../../../lib/stripe";
 import { prisma } from "../../../lib/prisma";
 import config from "../../../config";
-import { Plan } from "../../../generated/prisma/enums";
 
 export const stripeWebhook = async (req: Request, res: Response) => {
   console.log("headers:------------->", req.headers);
