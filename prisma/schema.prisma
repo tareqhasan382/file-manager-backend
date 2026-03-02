@@ -10,11 +10,13 @@ generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
 }
+
 datasource db {
   provider = "postgresql"
 }
 
 enum Role {
+  SUPER_ADMIN
   OWNER
   ADMIN
   MEMBER
@@ -26,6 +28,7 @@ enum Plan {
   GOLD
   DIAMOND
 }
+
 enum SubscriptionStatus {
   ACTIVE
   INCOMPLETE
@@ -33,16 +36,18 @@ enum SubscriptionStatus {
   PAST_DUE
   TRIAL
 }
+
 model Tenant {
-  id               String   @id @default(uuid())
-  name             String
-  plan             Plan
-  stripeCustomerId String? @unique
-  subscriptionId   String? @unique
+  id                 String              @id @default(uuid())
+  isBanned           Boolean             @default(false)
+  name               String
+  plan               Plan
+  stripeCustomerId   String?             @unique
+  subscriptionId     String?             @unique
   subscriptionStatus SubscriptionStatus?
-  storageUsed      Int      @default(0) // in MB
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @default(now())
+  storageUsed        Int                 @default(0) // in MB
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @default(now())
 
   users   User[]
   folders Folder[]
