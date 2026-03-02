@@ -3,19 +3,31 @@ import Stripe from "stripe";
 import { stripe } from "../../../lib/stripe";
 import { prisma } from "../../../lib/prisma";
 import config from "../../../config";
+import { Plan, SubscriptionStatus } from "../../../generated/prisma/enums";
+import {
+  subscriptionActivatedEmail,
+  paymentFailedEmail,
+  subscriptionCanceledEmail,
+  subscriptionRenewedEmail,
+} from "../../../lib/emailtemplates";
+import { sendEmail } from "../../../lib/email";
+
+// ─── Helper: get tenant with owner email ──────────────────────────────────────
+const getTenantWithOwner = async (subscriptionId: string) => {
+  return prisma.tenant.findFirst({
+    where: { subscriptionId },
+    include: { users: { where: { role: "OWNER" } } },
+  });
+};
 
 export const stripeWebhook = async (req: Request, res: Response) => {
-  console.log("headers:------------->", req.headers);
-  console.log("raw body type:------------>", Buffer.isBuffer(req.body));
-  console.log("webhooks----------->");
-
   const sig = req.headers["stripe-signature"];
   if (!sig) return res.status(400).send("Missing stripe-signature");
 
   let event: Stripe.Event;
 
+  // ─── Verify webhook signature ─────────────────────────────────────────────────
   try {
-    // Express.raw middleware ensures req.body is a Buffer
     event = stripe.webhooks.constructEvent(
       req.body,
       sig as string,
@@ -26,8 +38,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // ─── Handle events ────────────────────────────────────────────────────────────
   try {
     switch (event.type) {
+
+      // ── Payment success ──────────────────────────────────────────────────────
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const tenantId = session.client_reference_id!;
@@ -36,48 +51,123 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         const priceId = subscription.items.data[0].price.id;
 
-        const planMap: Record<string, any> = {
+        const priceMap: Record<string, string> = {
           [config.stripe.plans.silver]: "SILVER",
           [config.stripe.plans.gold]: "GOLD",
           [config.stripe.plans.diamond]: "DIAMOND",
         };
-        const plan = planMap[priceId] ?? "FREE";
+        const plan = priceMap[priceId] ?? session.metadata?.plan ?? "FREE";
 
-        await prisma.tenant.update({
+        const tenant = await prisma.tenant.update({
           where: { id: tenantId },
           data: {
-            plan,
+            plan: plan as Plan,
             subscriptionId,
-            subscriptionStatus: "ACTIVE",
+            subscriptionStatus: "ACTIVE" as SubscriptionStatus,
           },
+          include: { users: { where: { role: "OWNER" } } },
         });
 
-        console.log(`Tenant ${tenantId} subscription ACTIVE, plan ${plan}`);
+        const ownerEmail = tenant.users[0]?.email;
+        if (ownerEmail) {
+          const { subject, html } = subscriptionActivatedEmail({
+            name: tenant.name,
+            plan,
+          });
+          await sendEmail({ to: ownerEmail, subject, html });
+        }
+
+        console.log(`Tenant ${tenantId} → ACTIVE, plan: ${plan}`);
         break;
       }
 
+      // ── Subscription canceled ────────────────────────────────────────────────
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
+
+        const tenant = await getTenantWithOwner(subscription.id);
+
         await prisma.tenant.updateMany({
           where: { subscriptionId: subscription.id },
           data: {
-            plan: "FREE",
+            plan: "FREE" as Plan,
             subscriptionId: null,
-            subscriptionStatus: "CANCELED",
+            subscriptionStatus: "CANCELED" as SubscriptionStatus,
           },
         });
+
+        const ownerEmail = tenant?.users[0]?.email;
+        if (tenant && ownerEmail) {
+          const { subject, html } = subscriptionCanceledEmail({
+            name: tenant.name,
+            plan: tenant.plan,
+          });
+          await sendEmail({ to: ownerEmail, subject, html });
+        }
+
+        console.log(`Subscription ${subscription.id} → CANCELED, downgraded to FREE`);
         break;
       }
 
+      // ── Payment failed ───────────────────────────────────────────────────────
       case "invoice.payment_failed": {
-        const invoice = event.data.object as Stripe.Invoice;
-        // const subscriptionId = invoice.subscription as string;
-        await prisma.tenant.updateMany({
-          where: { subscriptionId: invoice.id },
-          data: {
-            subscriptionStatus: "PAST_DUE",
-          },
-        });
+        const invoice = event.data.object as Stripe.Invoice & {
+          subscription: string | null;
+        };
+        const subscriptionId = invoice.subscription as string;
+
+        if (subscriptionId) {
+          const tenant = await getTenantWithOwner(subscriptionId);
+
+          await prisma.tenant.updateMany({
+            where: { subscriptionId },
+            data: {
+              subscriptionStatus: "PAST_DUE" as SubscriptionStatus,
+            },
+          });
+
+          const ownerEmail = tenant?.users[0]?.email;
+          if (tenant && ownerEmail) {
+            const { subject, html } = paymentFailedEmail({
+              name: tenant.name,
+              plan: tenant.plan,
+            });
+            await sendEmail({ to: ownerEmail, subject, html });
+          }
+
+          console.log(`Subscription ${subscriptionId} → PAST_DUE`);
+        }
+        break;
+      }
+
+      // ── Subscription renewed ─────────────────────────────────────────────────
+      case "invoice.payment_succeeded": {
+        const invoice = event.data.object as Stripe.Invoice & {
+          subscription: string | null;
+        };
+        const subscriptionId = invoice.subscription as string;
+
+        if (subscriptionId) {
+          const tenant = await getTenantWithOwner(subscriptionId);
+
+          await prisma.tenant.updateMany({
+            where: { subscriptionId },
+            data: {
+              subscriptionStatus: "ACTIVE" as SubscriptionStatus,
+            },
+          });
+
+          const ownerEmail = tenant?.users[0]?.email;
+          if (tenant && ownerEmail) {
+            const { subject, html } = subscriptionRenewedEmail({
+              name: tenant.name,
+              plan: tenant.plan,
+            });
+            await sendEmail({ to: ownerEmail, subject, html });
+          }
+
+          console.log(`Subscription ${subscriptionId} → ACTIVE (renewed)`);
+        }
         break;
       }
 
@@ -87,7 +177,7 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
     res.status(200).json({ received: true });
   } catch (err: any) {
-    console.error("Error processing event:", err);
+    console.error("Error processing webhook event:", err);
     res.status(500).send("Internal Server Error");
   }
 };

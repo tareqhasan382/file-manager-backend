@@ -1,6 +1,8 @@
 import { prisma } from "../../../lib/prisma";
 import { stripe } from "../../../lib/stripe";
 import config from "../../../config";
+import { AppError } from "../../../utils/app_error";
+import httpStatus from "http-status";
 
 const createBilling = async ({
   userId,
@@ -14,17 +16,26 @@ const createBilling = async ({
     include: { tenant: true },
   });
 
-  if (!user) throw new Error("User not found");
+  if (!user) throw new AppError("User not found", httpStatus.NOT_FOUND);
 
   const tenant = user.tenant;
 
-  //  FREE plan
+  // ─── FREE plan ────────────────────────────────────────────────────────────────
   if (plan === "FREE") {
+    // Cancel active Stripe subscription if exists
+    if (tenant.subscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(tenant.subscriptionId);
+      } catch (err) {
+        console.error("Failed to cancel Stripe subscription:", err);
+      }
+    }
+
     await prisma.tenant.update({
       where: { id: tenant.id },
       data: {
         plan: "FREE",
-        subscriptionStatus: "ACTIVE",
+        subscriptionStatus: "CANCELED",
         subscriptionId: null,
       },
     });
@@ -32,7 +43,7 @@ const createBilling = async ({
     return { message: "Free plan activated" };
   }
 
-  //  Plan → Price mapping
+  // ─── Plan → Price mapping ─────────────────────────────────────────────────────
   const priceMap: Record<string, string> = {
     SILVER: config.stripe.plans.silver,
     GOLD: config.stripe.plans.gold,
@@ -40,9 +51,9 @@ const createBilling = async ({
   };
 
   const priceId = priceMap[plan];
-  if (!priceId) throw new Error("Invalid plan");
+  if (!priceId) throw new AppError("Invalid plan", httpStatus.BAD_REQUEST);
 
-  //  Create customer if needed
+  // ─── Create Stripe customer if needed ────────────────────────────────────────
   let customerId = tenant.stripeCustomerId;
   if (!customerId) {
     const customer = await stripe.customers.create({
@@ -58,19 +69,11 @@ const createBilling = async ({
     });
   }
 
-  //  Mark as INCOMPLETE before payment
-  await prisma.tenant.update({
-    where: { id: tenant.id },
-    data: {
-      subscriptionStatus: "INCOMPLETE",
-    },
-  });
-
-  //  Checkout session
+  // ─── Checkout session ─────────────────────────────────────────────────────────
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    client_reference_id: tenant.id, // IMPORTANT
+    client_reference_id: tenant.id,
     metadata: {
       tenantId: tenant.id,
       plan,
@@ -80,9 +83,7 @@ const createBilling = async ({
     cancel_url: `${process.env.FRONTEND_URL}`,
   });
 
-  return {
-    url: session.url,
-  };
+  return { url: session.url };
 };
 
 export const billingServices = { createBilling };
