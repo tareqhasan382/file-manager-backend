@@ -37,11 +37,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         const priceId = subscription.items.data[0].price.id;
 
-        // const planMap: Record<string, string> = {
-        //   [config.stripe.plans.silver]: "SILVER",
-        //   [config.stripe.plans.gold]: "GOLD",
-        //   [config.stripe.plans.diamond]: "DIAMOND",
-        // };
         const planMap: Record<string, any> = {
           [config.stripe.plans.silver]: "SILVER",
           [config.stripe.plans.gold]: "GOLD",

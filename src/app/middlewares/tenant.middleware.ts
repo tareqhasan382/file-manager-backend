@@ -1,4 +1,4 @@
-import { NextFunction, Response,Request } from "express";
+import { NextFunction, Response, Request } from "express";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
 import { prisma } from "../../lib/prisma";
@@ -8,7 +8,7 @@ export const tenantMiddleware = async (
   res: Response,
   next: NextFunction
 ) => {
-  const tenantId = req.user?.tenantId;
+  let tenantId = req.user?.tenantId;
 
   if (!tenantId) {
     throw new AppError("Tenant not found", httpStatus.BAD_REQUEST);
@@ -21,8 +21,6 @@ export const tenantMiddleware = async (
   if (!tenant) {
     throw new AppError("Tenant does not exist", httpStatus.NOT_FOUND);
   }
-
-  //req.user.tenantId = tenant;
-  req.user = tenant;
+  tenantId = tenant
   next();
 };
