@@ -3,6 +3,7 @@ import { fileControllers } from "./file.controller";
 import { authMiddleware } from "../../middlewares/auth.middleware";
 import { fileParamSchema, updateFileSchema, uploadFileSchema } from "./file.validate";
 import validateRequest from "../../middlewares/validateRequest";
+import { validateFileUpload } from "../../middlewares/plan.middleware";
 
 
 const fileRoute = Router();
@@ -11,6 +12,7 @@ fileRoute.post(
   "/",
   authMiddleware,
   validateRequest(uploadFileSchema),
+  validateFileUpload,
   fileControllers.createFile
 );
 

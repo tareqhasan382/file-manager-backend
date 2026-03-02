@@ -3,6 +3,7 @@ import { folderControllers } from "./folder.controller";
 import { authMiddleware } from "../../middlewares/auth.middleware";
 import validateRequest from "../../middlewares/validateRequest";
 import { createFolderSchema, folderParamSchema, updateFolderSchema } from "./folder.validation";
+import { validateFolderCreate } from "../../middlewares/plan.middleware";
 
 const folderRoute = Router();
 
@@ -10,6 +11,7 @@ folderRoute.post(
   "/",
   authMiddleware,
   validateRequest(createFolderSchema),
+  validateFolderCreate,
   folderControllers.createFolder
 );
 
