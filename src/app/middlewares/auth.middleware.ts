@@ -1,27 +1,32 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import jwt, { JwtPayload, Secret } from "jsonwebtoken";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
 import config from "../../config";
 
-export interface AuthRequest extends Request {
-  user?: any;
-}
-
 export const authMiddleware = (
-  req: AuthRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const token = req.headers.authorization?.split(" ")[1];
-
+  const token = req.headers.authorization;
   if (!token) {
-    throw new AppError("Unauthorized access", httpStatus.UNAUTHORIZED);
+    res.status(httpStatus.UNAUTHORIZED).json({
+      statusCode: httpStatus.UNAUTHORIZED,
+      success: false,
+      message: "Unauthorized access",
+      data: null,
+    });
+    return;
   }
 
   try {
-    const decoded = jwt.verify(token, config.jwt.secret as string);
-    req.user = decoded;
+    const verifiedUser = jwt.verify(
+      token,
+      config.jwt.secret as Secret
+    ) as JwtPayload;
+
+    req.user = verifiedUser;
     next();
   } catch {
     throw new AppError("Invalid or expired token", httpStatus.UNAUTHORIZED);

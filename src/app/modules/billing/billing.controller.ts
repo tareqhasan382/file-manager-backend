@@ -4,7 +4,10 @@ import catchAsync from "../../../shared/catchAsync";
 import { billingServices } from "./billing.service";
 
 const create = catchAsync(async (req: Request, res: Response) => {
-  const result = await billingServices.create(req);
+  const data = req.body;
+  const { userId, tenantId } = req.user as any;
+
+  const result = await billingServices.createBilling({ plan:data?.plan, userId });
 
   res.status(httpStatus.OK).json({
     success: true,
@@ -13,6 +16,4 @@ const create = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-export const billingControllers = {
-  create,
-};
+export const billingControllers = { create };

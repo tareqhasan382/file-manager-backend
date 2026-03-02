@@ -1,79 +1,88 @@
 import { prisma } from "../../../lib/prisma";
-import { AppError } from "../../../utils/app_error";
-import httpStatus from "http-status";
 import { stripe } from "../../../lib/stripe";
-// import { STRIPE_PRICES } from "../../../config/stripe";
 import config from "../../../config";
-import { STRIPE_PRICES } from "../../../config/stripePlans";
 
-export const create = async (req: any) => {
-  const { plan } = req.body;
-  const { userId, tenantId } = req.user; // auth middleware থেকে
-
-  if (!plan) {
-    throw new AppError("Plan is required", httpStatus.BAD_REQUEST);
-  }
-
-  if (!["SILVER", "GOLD", "DIAMOND"].includes(plan)) {
-    throw new AppError("Invalid plan selected", httpStatus.BAD_REQUEST);
-  }
-
-  // 1️ Tenant fetch
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
+const createBilling = async ({
+  userId,
+  plan,
+}: {
+  userId: string;
+  plan: string;
+}) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { tenant: true },
   });
 
-  if (!tenant) {
-    throw new AppError("Tenant not found", httpStatus.NOT_FOUND);
-  }
+  if (!user) throw new Error("User not found");
 
-  // 2️ Stripe customer create (only once)
-  let stripeCustomerId = tenant.stripeCustomerId;
+  const tenant = user.tenant;
 
-  if (!stripeCustomerId) {
-    const customer = await stripe.customers.create({
-      name: tenant.name,
-      metadata: {
-        tenantId: tenant.id,
-        userId,
+  //  FREE plan
+  if (plan === "FREE") {
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: {
+        plan: "FREE",
+        subscriptionStatus: "ACTIVE",
+        subscriptionId: null,
       },
     });
 
-    stripeCustomerId = customer.id;
+    return { message: "Free plan activated" };
+  }
+
+  //  Plan → Price mapping
+  const priceMap: Record<string, string> = {
+    SILVER: config.stripe.plans.silver,
+    GOLD: config.stripe.plans.gold,
+    DIAMOND: config.stripe.plans.diamond,
+  };
+
+  const priceId = priceMap[plan];
+  if (!priceId) throw new Error("Invalid plan");
+
+  //  Create customer if needed
+  let customerId = tenant.stripeCustomerId;
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: user.email,
+      name: tenant.name,
+    });
+
+    customerId = customer.id;
 
     await prisma.tenant.update({
       where: { id: tenant.id },
-      data: { stripeCustomerId },
+      data: { stripeCustomerId: customerId },
     });
   }
 
-  // 3️ Plan → Stripe Price ID
-  const priceId = STRIPE_PRICES[plan as keyof typeof STRIPE_PRICES];
-
-  if (!priceId) {
-    throw new AppError("Stripe price not configured", httpStatus.BAD_REQUEST);
-  }
-
-  //4️ Stripe Checkout Session
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: stripeCustomerId,
-    line_items: [
-      {
-        price: priceId,
-        quantity: 1,
-      },
-    ],
-    success_url: `${config.frontend_url}/billing/success`,
-    cancel_url: `${config.frontend_url}/billing/cancel`,
+  //  Mark as INCOMPLETE before payment
+  await prisma.tenant.update({
+    where: { id: tenant.id },
+    data: {
+      subscriptionStatus: "INCOMPLETE",
+    },
   });
 
-  // 5️ শুধু URL return
+  //  Checkout session
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    customer: customerId,
+    client_reference_id: tenant.id, // IMPORTANT
+    metadata: {
+      tenantId: tenant.id,
+      plan,
+    },
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${process.env.FRONTEND_URL}`,
+    cancel_url: `${process.env.FRONTEND_URL}`,
+  });
+
   return {
-    checkoutUrl: session.url,
+    url: session.url,
   };
 };
 
-export const billingServices = {
-  create,
-};
+export const billingServices = { createBilling };

@@ -5,10 +5,10 @@
 
 // datasource db {
 //   provider = "postgresql"
-// }
+// } "../generated/prisma"
 generator client {
   provider = "prisma-client"
-  output   = "../generated/prisma"
+  output   = "../src/generated/prisma"
 }
 datasource db {
   provider = "postgresql"
@@ -26,13 +26,20 @@ enum Plan {
   GOLD
   DIAMOND
 }
-
+enum SubscriptionStatus {
+  ACTIVE
+  INCOMPLETE
+  CANCELED
+  PAST_DUE
+  TRIAL
+}
 model Tenant {
   id               String   @id @default(uuid())
   name             String
   plan             Plan
   stripeCustomerId String? @unique
   subscriptionId   String? @unique
+  subscriptionStatus SubscriptionStatus?
   storageUsed      Int      @default(0) // in MB
   createdAt        DateTime @default(now())
   updatedAt        DateTime @default(now())
