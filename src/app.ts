@@ -25,6 +25,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 /* -------------------- Routes -------------------- */
+app.use("/api/cron", (req, res, next) => next());
 app.use("/api/v1", router);
 
 /* -------------------- Health -------------------- */
