@@ -8,29 +8,28 @@ import { stripeWebhook } from "./app/modules/billing/stripe.webhook";
 const app: Application = express();
 
 /* -------------------- CORS -------------------- */
-const corsOptions = {
+app.use(cors({
   origin: ["http://localhost:5173", "http://localhost:3000"],
   credentials: true,
-  optionsSuccessStatus: 200,
-};
-app.use(cors(corsOptions));
-/* -------------------- Stripe Webhook (RAW FIRST) -------------------- */
+}));
+
+/* -------------------- Stripe Webhook -------------------- */
 app.post(
   "/api/v1/webhooks/stripe",
   express.raw({ type: "application/json" }),
   stripeWebhook
 );
-/* -------------------- Parsers -------------------- */
+
+/* -------------------- JSON Parsers -------------------- */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
 /* -------------------- Routes -------------------- */
 app.use("/api/v1", router);
 
+/* -------------------- Health -------------------- */
 app.get("/api/v1/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Server is running 🚀",
-  });
+  res.status(200).json({ success: true, message: "Server is running 🚀" });
 });
 
 /* -------------------- Not Found -------------------- */
