@@ -1,11 +1,10 @@
-import { NextFunction, Response } from "express";
-import { AuthRequest } from "./auth.middleware";
+import { NextFunction, Response,Request } from "express";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
 import { prisma } from "../../lib/prisma";
 
 export const tenantMiddleware = async (
-  req: AuthRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {
@@ -23,6 +22,7 @@ export const tenantMiddleware = async (
     throw new AppError("Tenant does not exist", httpStatus.NOT_FOUND);
   }
 
-  req.user.tenant = tenant;
+  //req.user.tenantId = tenant;
+  req.user = tenant;
   next();
 };

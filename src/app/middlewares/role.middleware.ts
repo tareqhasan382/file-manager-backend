@@ -1,11 +1,10 @@
-import { NextFunction, Response } from "express";
-import { AuthRequest } from "./auth.middleware";
+import { NextFunction, Response,Request } from "express";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
 
 export const roleMiddleware =
   (...allowedRoles: string[]) =>
-  (req: AuthRequest, res: Response, next: NextFunction) => {
+  (req: Request, res: Response, next: NextFunction) => {
     const role = req.user?.role;
 
     if (!role || !allowedRoles.includes(role)) {
