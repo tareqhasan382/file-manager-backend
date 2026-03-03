@@ -3,9 +3,10 @@ import jwt, { JwtPayload, Secret } from "jsonwebtoken";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
 import config from "../../config";
+import { prisma } from "../../lib/prisma";
 
 
-export const authMiddleware = (
+export const authMiddleware = async (
   req: Request,
   res: Response,
   next: NextFunction
@@ -26,7 +27,17 @@ export const authMiddleware = (
       token,
       config.jwt.secret as Secret
     ) as JwtPayload;
+    //console.log("verifiedUser--------->", verifiedUser)
+    const user = await prisma.user.findUnique({
+      where: { id: verifiedUser.userId },
+      select: { id: true, email: true, role: true, tenantId: true },
+    });
 
+    if (!user) {
+      throw new AppError("User no longer exists", httpStatus.UNAUTHORIZED);
+    }
+   // console.log("user--------->", user)
+    req.user = user;
     req.user = verifiedUser;
 
     next();

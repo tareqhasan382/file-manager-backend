@@ -83,7 +83,22 @@ export const login = async (payload: ILoginPayload) => {
   if (!user) {
     throw new AppError("User not found", httpStatus.NOT_FOUND);
   }
+  //console.log("user--------->", user)
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: user.tenantId },
+  });
+  //console.log("tenant---------->", tenant)
+  if (!tenant) {
+    throw new AppError("Tenant does not exist", httpStatus.NOT_FOUND);
+  }
 
+  // Ban check
+  if (tenant.isBanned) {
+    throw new AppError(
+      "Your organization has been banned. Please contact support.",
+      httpStatus.FORBIDDEN
+    );
+  }
   // 2️ Verify password
   const isPasswordMatch = await bcrypt.compare(password, user.password);
   if (!isPasswordMatch) {
