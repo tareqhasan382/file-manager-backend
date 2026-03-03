@@ -31,6 +31,7 @@ export const register = async (payload: IRegisterPayload) => {
     data: {
       name: companyName,
       plan: "FREE", // default free plan
+      subscriptionStatus: "ACTIVE",
     },
   });
 
