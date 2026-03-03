@@ -2,19 +2,19 @@ export const PLAN_LIMITS = {
   FREE: {
     maxFiles: 2,
     maxFolders: 2,
-    maxStorageMB: 10,
+    maxStorageMB: 10*1024,
     maxFolderDepth: 2,
   },
   SILVER: {
     maxFiles: 4,
     maxFolders: 4,
-    maxStorageMB: 100,
+    maxStorageMB: 100*1024,
     maxFolderDepth: 4,
   },
   GOLD: {
     maxFiles: 20,
     maxFolders: 20,
-    maxStorageMB: 500,
+    maxStorageMB: 500*1024,
     maxFolderDepth: 6,
   },
   DIAMOND: {

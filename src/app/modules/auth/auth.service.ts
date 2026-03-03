@@ -4,6 +4,8 @@ import httpStatus from "http-status";
 import bcrypt from "bcrypt";
 import { jwtHelpers } from "../../../utils/JWT";
 import config from "../../../config";
+import { subscriptionActivatedEmail } from "../../../lib/emailtemplates";
+import { sendEmail } from "../../../lib/email";
 
 interface IRegisterPayload {
   email: string;
@@ -57,7 +59,13 @@ export const register = async (payload: IRegisterPayload) => {
     },
   });
 
-
+  if (user.email) {
+    const { subject, html } = subscriptionActivatedEmail({
+      name: tenant.name,
+      plan: "FREE",
+    });
+    await sendEmail({ to: user.email, subject, html });
+  }
   return {
     userId: user.id,
     tenantId: tenant.id,
@@ -84,13 +92,13 @@ export const login = async (payload: ILoginPayload) => {
 
   // 3️ Generate JWT tokens
   const accessToken = jwtHelpers.generateToken(
-    { userId: user.id, email: user.email, role: user.role,tenantId:user.tenantId },
+    { userId: user.id, email: user.email, role: user.role, tenantId: user.tenantId },
     config.jwt.secret as string,
     config.jwt.expires_in as string
   );
 
   const refreshToken = jwtHelpers.generateToken(
-    { userId: user.id, email: user.email, role: user.role,tenantId:user.tenantId },
+    { userId: user.id, email: user.email, role: user.role, tenantId: user.tenantId },
     config.jwt.refresh_secret as string,
     config.jwt.refresh_expires_in as string
   );
