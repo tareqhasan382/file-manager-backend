@@ -9,7 +9,7 @@ export const tenantMiddleware = async (
   next: NextFunction
 ) => {
   const tenantId = req.user?.tenantId;
-
+//console.log("tenantId---------->",tenantId)
   if (!tenantId) {
     throw new AppError("Tenant not found", httpStatus.BAD_REQUEST);
   }
@@ -17,12 +17,12 @@ export const tenantMiddleware = async (
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
   });
-
+//console.log("tenant---------->",tenant)
   if (!tenant) {
     throw new AppError("Tenant does not exist", httpStatus.NOT_FOUND);
   }
 
-  // ✅ Ban check
+  // Ban check
   if (tenant.isBanned) {
     throw new AppError(
       "Your organization has been banned. Please contact support.",
@@ -30,6 +30,6 @@ export const tenantMiddleware = async (
     );
   }
 
-  req.tenant = tenant; // ✅ এটাও fix করা হয়েছে (আগে tenantId = tenant ছিল যেটা wrong)
+  req.tenant = tenant; 
   next();
 };

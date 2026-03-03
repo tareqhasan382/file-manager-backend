@@ -6,6 +6,6 @@ import { tenantMiddleware } from "../../middlewares/tenant.middleware";
 
 const userRoute = Router();
 
-userRoute.get("/me", authMiddleware, tenantMiddleware,roleMiddleware("ADMIN", "OWNER", "MEMBER"), userControllers.getMe);
+userRoute.get("/me", authMiddleware,tenantMiddleware, roleMiddleware("ADMIN", "OWNER", "MEMBER"), userControllers.getMe);
 
 export default userRoute;

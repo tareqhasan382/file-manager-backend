@@ -3,9 +3,9 @@ import jwt, { JwtPayload, Secret } from "jsonwebtoken";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
 import config from "../../config";
-import { prisma } from "../../lib/prisma"; //  add
 
-export const authMiddleware = async ( //  async
+
+export const authMiddleware = (
   req: Request,
   res: Response,
   next: NextFunction
@@ -27,20 +27,11 @@ export const authMiddleware = async ( //  async
       config.jwt.secret as Secret
     ) as JwtPayload;
 
-    //  DB check user actually exist
-    const user = await prisma.user.findUnique({
-      where: { id: verifiedUser.id },
-      select: { id: true, email: true, role: true, tenantId: true },
-    });
+    req.user = verifiedUser;
 
-    if (!user) {
-      throw new AppError("User no longer exists", httpStatus.UNAUTHORIZED);
-    }
-
-    req.user = user;
     next();
-  } catch (err) {
-    if (err instanceof AppError) throw err;
+  } catch {
+
     throw new AppError("Invalid or expired token", httpStatus.UNAUTHORIZED);
   }
 };
