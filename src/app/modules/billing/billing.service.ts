@@ -79,8 +79,8 @@ const createBilling = async ({
       plan,
     },
     line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${process.env.FRONTEND_URL}`,
-    cancel_url: `${process.env.FRONTEND_URL}`,
+    success_url: `${process.env.FRONTEND_URL}/success`,
+    cancel_url: `${process.env.FRONTEND_URL}/cancel`,
   });
 
   return { url: session.url };
