@@ -1,5 +1,8 @@
 import { prisma } from "../src/lib/prisma";
 import bcrypt from "bcrypt";
+import config from "../src/config";
+import { Plan, Role } from "../src/generated/prisma/enums";
+
 async function main() {
   console.log("Seed starting...");
 
@@ -8,8 +11,8 @@ async function main() {
     update: {},
     create: {
       id: "00000000-0000-0000-0000-000000000000",
-      name: "System",
-      plan: "DIAMOND",
+      name: config.super_admin.name as string,
+      plan: config.super_admin.plan as Plan,
       isBanned: false,
     },
   });
@@ -17,7 +20,7 @@ async function main() {
   console.log("Tenant created:", superAdminTenant.id);
 
   const existing = await prisma.user.findUnique({
-    where: { email: "superadmin@filevault.com" },
+    where: { email: config.super_admin.email },
   });
 
   console.log("Existing user:", existing);
@@ -25,9 +28,9 @@ async function main() {
   if (!existing) {
     const user = await prisma.user.create({
       data: {
-        email: "superadmin@filevault.com",
-        password: await bcrypt.hash("SuperSecret123@", 10),
-        role: "SUPER_ADMIN",
+        email: config.super_admin.email,
+        password: await bcrypt.hash(config.super_admin.password, 10),
+        role: config.super_admin.role as Role,
         tenantId: superAdminTenant.id,
       },
     });

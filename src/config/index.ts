@@ -7,14 +7,20 @@ export default {
   port: process.env.PORT,
   database_url: process.env.DATABASE_URL,
   bycrypt_salt_rounds: process.env.BCRYPT_SALT_ROUNDS,
-  frontend_url:process.env.FRONTEND_URL,
+  frontend_url: process.env.FRONTEND_URL,
   jwt: {
     secret: process.env.JWT_SECRET,
     refresh_secret: process.env.JWT_REFRESH_SECRET,
     expires_in: process.env.JWT_EXPIRES_IN,
     refresh_expires_in: process.env.JWT_REFRESH_EXPIRES_IN,
   },
-
+  super_admin: {
+    name: process.env.SUPER_ADMIN_NAME as string,
+    email: process.env.SUPER_ADMIN_EMAIL as string,
+    password: process.env.SUPER_ADMIN_PASSWORD as string,
+    role: process.env.SUPER_ADMIN_ROLE as string,
+    plan: process.env.SUPER_ADMIN_PLAN as string,
+  },
   stripe: {
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET as string,
     key: {
