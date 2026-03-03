@@ -5,11 +5,13 @@ import validateRequest from "../../middlewares/validateRequest";
 import { createFolderSchema, folderParamSchema, updateFolderSchema } from "./folder.validation";
 import { validateFolderCreate } from "../../middlewares/plan.middleware";
 import { roleMiddleware } from "../../middlewares/role.middleware";
+import { tenantMiddleware } from "../../middlewares/tenant.middleware";
 
 const folderRoute = Router();
 folderRoute.post(
   "/",
   authMiddleware,
+  tenantMiddleware,
   roleMiddleware("ADMIN","OWNER","MEMBER"),
   validateRequest(createFolderSchema),
   validateFolderCreate,
@@ -21,6 +23,7 @@ folderRoute.get("/", authMiddleware,roleMiddleware("ADMIN", "OWNER", "MEMBER"), 
 folderRoute.get(
   "/:id",
   authMiddleware,
+  tenantMiddleware,
   roleMiddleware("ADMIN", "OWNER", "MEMBER"),
   validateRequest(folderParamSchema),
   folderControllers.getFolderById
@@ -29,6 +32,7 @@ folderRoute.get(
 folderRoute.patch(
   "/:id",
   authMiddleware,
+  tenantMiddleware,
   roleMiddleware("ADMIN", "OWNER", "MEMBER"),
   validateRequest(updateFolderSchema),
   folderControllers.updateFolder
@@ -37,6 +41,7 @@ folderRoute.patch(
 folderRoute.delete(
   "/:id",
   authMiddleware,
+  tenantMiddleware,
   roleMiddleware("ADMIN", "OWNER", "MEMBER"),
   validateRequest(folderParamSchema),
   folderControllers.deleteFolder

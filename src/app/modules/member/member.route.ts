@@ -4,6 +4,7 @@ import { authMiddleware } from "../../middlewares/auth.middleware";
 import validateRequest from "../../middlewares/validateRequest";
 import { createMemberSchema, memberParamSchema } from "./member.validation";
 import { roleMiddleware } from "../../middlewares/role.middleware";
+import { tenantMiddleware } from "../../middlewares/tenant.middleware";
 
 const memberRoute = Router();
 
@@ -11,6 +12,7 @@ const memberRoute = Router();
 memberRoute.get(
   "/",
   authMiddleware,
+  tenantMiddleware,
   roleMiddleware("OWNER"),
   memberControllers.getMembers
 );
@@ -19,6 +21,7 @@ memberRoute.get(
 memberRoute.post(
   "/",
   authMiddleware,
+  tenantMiddleware,
   roleMiddleware("OWNER"),
   validateRequest(createMemberSchema),
   memberControllers.createMember
@@ -28,6 +31,7 @@ memberRoute.post(
 memberRoute.delete(
   "/:id",
   authMiddleware,
+  tenantMiddleware,
   roleMiddleware("OWNER"),
   validateRequest(memberParamSchema),
   memberControllers.deleteMember

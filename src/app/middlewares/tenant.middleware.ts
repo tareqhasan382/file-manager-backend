@@ -8,7 +8,7 @@ export const tenantMiddleware = async (
   res: Response,
   next: NextFunction
 ) => {
-  let tenantId = req.user?.tenantId;
+  const tenantId = req.user?.tenantId;
 
   if (!tenantId) {
     throw new AppError("Tenant not found", httpStatus.BAD_REQUEST);
@@ -21,6 +21,15 @@ export const tenantMiddleware = async (
   if (!tenant) {
     throw new AppError("Tenant does not exist", httpStatus.NOT_FOUND);
   }
-  tenantId = tenant
+
+  // ✅ Ban check
+  if (tenant.isBanned) {
+    throw new AppError(
+      "Your organization has been banned. Please contact support.",
+      httpStatus.FORBIDDEN
+    );
+  }
+
+  req.tenant = tenant; // ✅ এটাও fix করা হয়েছে (আগে tenantId = tenant ছিল যেটা wrong)
   next();
 };

@@ -4,6 +4,7 @@ declare global {
   namespace Express {
     interface Request {
       user: AuthUser;
+      tenant?: Tenant;
       //user?: Record<string, any>;
     }
   }

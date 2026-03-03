@@ -17,6 +17,7 @@ const getMe = async (userId: string) => {
           id: true,
           name: true,
           plan: true,
+          isBanned: true,
           subscriptionStatus: true,
           storageUsed: true,
           createdAt: true,
