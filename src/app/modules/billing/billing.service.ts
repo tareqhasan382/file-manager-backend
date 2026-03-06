@@ -11,6 +11,7 @@ const createBilling = async ({
   userId: string;
   plan: string;
 }) => {
+  // ─── Fetch user + tenant ───────────────────────────────
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { tenant: true },
@@ -19,48 +20,48 @@ const createBilling = async ({
   if (!user) throw new AppError("User not found", httpStatus.NOT_FOUND);
 
   const tenant = user.tenant;
+  if (!tenant) throw new AppError("Tenant not found", httpStatus.NOT_FOUND);
 
-  // ─── FREE plan ────────────────────────────────────────────────────────────────
+  // ─── FREE plan ────────────────────────────────────────
   if (plan === "FREE") {
-    // Cancel active Stripe subscription if exists
-    if (tenant.subscriptionId) {
-      try {
-        await stripe.subscriptions.cancel(tenant.subscriptionId);
-      } catch (err) {
-        console.error("Failed to cancel Stripe subscription:", err);
+    return await prisma.$transaction(async (tx) => {
+      if (tenant.subscriptionId) {
+        try {
+          await stripe.subscriptions.cancel(tenant.subscriptionId);
+        } catch (err) {
+          console.error("Failed to cancel Stripe subscription:", err);
+        }
       }
-    }
 
-    await prisma.tenant.update({
-      where: { id: tenant.id },
-      data: {
-        plan: "FREE",
-        subscriptionStatus: "CANCELED",
-        subscriptionId: null,
-      },
+      await tx.tenant.update({
+        where: { id: tenant.id },
+        data: {
+          plan: "FREE",
+          subscriptionStatus: "CANCELED",
+          subscriptionId: null,
+        },
+      });
+
+      return { message: "Free plan activated" };
     });
-
-    return { message: "Free plan activated" };
   }
 
-  // ─── Plan → Price mapping ─────────────────────────────────────────────────────
+  // ─── Plan → Price mapping ─────────────────────────────
   const priceMap: Record<string, string> = {
     SILVER: config.stripe.plans.silver,
     GOLD: config.stripe.plans.gold,
     DIAMOND: config.stripe.plans.diamond,
   };
-
   const priceId = priceMap[plan];
   if (!priceId) throw new AppError("Invalid plan", httpStatus.BAD_REQUEST);
 
-  // ─── Create Stripe customer if needed ────────────────────────────────────────
+  // ─── Create Stripe customer if needed ────────────────
   let customerId = tenant.stripeCustomerId;
   if (!customerId) {
     const customer = await stripe.customers.create({
       email: user.email,
       name: tenant.name,
     });
-
     customerId = customer.id;
 
     await prisma.tenant.update({
@@ -69,15 +70,12 @@ const createBilling = async ({
     });
   }
 
-  // ─── Checkout session ─────────────────────────────────────────────────────────
+  // ─── Create checkout session ─────────────────────────
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
     client_reference_id: tenant.id,
-    metadata: {
-      tenantId: tenant.id,
-      plan,
-    },
+    metadata: { tenantId: tenant.id, plan },
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${process.env.FRONTEND_URL}/success`,
     cancel_url: `${process.env.FRONTEND_URL}/cancel`,
