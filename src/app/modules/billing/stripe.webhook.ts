@@ -12,7 +12,7 @@ import {
 } from "../../../lib/emailtemplates";
 import { sendEmail } from "../../../lib/email";
 
-// ─── Helper: get tenant with owner email ──────────────────────────────────────
+// ─── Helper: get tenant with owner email ─────────────
 const getTenantWithOwner = async (subscriptionId: string) => {
   return prisma.tenant.findFirst({
     where: { subscriptionId },
@@ -26,7 +26,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
   let event: Stripe.Event;
 
-  // ─── Verify webhook signature ─────────────────────────────────────────────────
   try {
     event = stripe.webhooks.constructEvent(
       req.body,
@@ -38,11 +37,8 @@ export const stripeWebhook = async (req: Request, res: Response) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // ─── Handle events ────────────────────────────────────────────────────────────
   try {
     switch (event.type) {
-
-      // ── Payment success ──────────────────────────────────────────────────────
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const tenantId = session.client_reference_id!;
@@ -58,14 +54,17 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         };
         const plan = priceMap[priceId] ?? session.metadata?.plan ?? "FREE";
 
-        const tenant = await prisma.tenant.update({
-          where: { id: tenantId },
-          data: {
-            plan: plan as Plan,
-            subscriptionId,
-            subscriptionStatus: "ACTIVE" as SubscriptionStatus,
-          },
-          include: { users: { where: { role: "OWNER" } } },
+        // ─── Prisma transaction ───────────────────────────
+        const tenant = await prisma.$transaction(async (tx) => {
+          return tx.tenant.update({
+            where: { id: tenantId },
+            data: {
+              plan: plan as Plan,
+              subscriptionId,
+              subscriptionStatus: "ACTIVE" as SubscriptionStatus,
+            },
+            include: { users: { where: { role: "OWNER" } } },
+          });
         });
 
         const ownerEmail = tenant.users[0]?.email;
@@ -81,19 +80,19 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         break;
       }
 
-      // ── Subscription canceled ────────────────────────────────────────────────
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
-
         const tenant = await getTenantWithOwner(subscription.id);
 
-        await prisma.tenant.updateMany({
-          where: { subscriptionId: subscription.id },
-          data: {
-            plan: "FREE" as Plan,
-            subscriptionId: null,
-            subscriptionStatus: "CANCELED" as SubscriptionStatus,
-          },
+        await prisma.$transaction(async (tx) => {
+          await tx.tenant.updateMany({
+            where: { subscriptionId: subscription.id },
+            data: {
+              plan: "FREE" as Plan,
+              subscriptionId: null,
+              subscriptionStatus: "CANCELED" as SubscriptionStatus,
+            },
+          });
         });
 
         const ownerEmail = tenant?.users[0]?.email;
@@ -105,11 +104,10 @@ export const stripeWebhook = async (req: Request, res: Response) => {
           await sendEmail({ to: ownerEmail, subject, html });
         }
 
-        console.log(`Subscription ${subscription.id} → CANCELED, downgraded to FREE`);
+        console.log(`Subscription ${subscription.id} → CANCELED`);
         break;
       }
 
-      // ── Payment failed ───────────────────────────────────────────────────────
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice & {
           subscription: string | null;
@@ -119,11 +117,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         if (subscriptionId) {
           const tenant = await getTenantWithOwner(subscriptionId);
 
-          await prisma.tenant.updateMany({
-            where: { subscriptionId },
-            data: {
-              subscriptionStatus: "PAST_DUE" as SubscriptionStatus,
-            },
+          await prisma.$transaction(async (tx) => {
+            await tx.tenant.updateMany({
+              where: { subscriptionId },
+              data: { subscriptionStatus: "PAST_DUE" as SubscriptionStatus },
+            });
           });
 
           const ownerEmail = tenant?.users[0]?.email;
@@ -140,7 +138,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         break;
       }
 
-      // ── Subscription renewed ─────────────────────────────────────────────────
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice & {
           subscription: string | null;
@@ -150,11 +147,11 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         if (subscriptionId) {
           const tenant = await getTenantWithOwner(subscriptionId);
 
-          await prisma.tenant.updateMany({
-            where: { subscriptionId },
-            data: {
-              subscriptionStatus: "ACTIVE" as SubscriptionStatus,
-            },
+          await prisma.$transaction(async (tx) => {
+            await tx.tenant.updateMany({
+              where: { subscriptionId },
+              data: { subscriptionStatus: "ACTIVE" as SubscriptionStatus },
+            });
           });
 
           const ownerEmail = tenant?.users[0]?.email;
