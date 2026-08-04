@@ -17,3 +17,9 @@ export const tenantParamSchema = z.object({
     id: zodObjectId,
   }),
 });
+
+export const userSchema = z.object({
+  params: z.object({
+    id: zodObjectId,
+  }),
+});

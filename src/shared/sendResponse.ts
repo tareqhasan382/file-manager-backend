@@ -8,6 +8,9 @@ type IApiReponse<T> = {
     page?: number;
     limit?: number;
     total?: number;
+    pages?: number;
+    filters?: Record<string, any>;
+    [key: string]: any;
   };
   data?: T | null;
 };

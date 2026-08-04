@@ -18,5 +18,6 @@ authRoute.post("/verify-otp", validateRequest(verifyOtpSchema), authControllers.
 authRoute.post("/resend-otp", validateRequest(resendOtpSchema), authControllers.resendOtp);
 authRoute.post("/forgot-password", validateRequest(forgotPasswordSchema), authControllers.forgotPassword);
 authRoute.post("/reset-password", validateRequest(resetPasswordSchema), authControllers.resetPassword);
+authRoute.post("/logout", authMiddleware, authControllers.logout);
 authRoute.get("/me", authMiddleware, authControllers.getMe);
 export default authRoute;

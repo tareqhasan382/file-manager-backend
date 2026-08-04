@@ -32,7 +32,7 @@ export const authMiddleware = async (
     const user = await User.findOne({
       _id: verifiedUser.userId,
     })
-      .select("id email role tenantId fullName")
+       .select("id email role tenantId fullName avatar phone")
       .lean();
 
     if (!user) {
@@ -46,6 +46,8 @@ export const authMiddleware = async (
       role: user.role,
       tenantId: user.tenantId.toString(),
     };
+    (req.user as any).avatar = user.avatar ?? null;
+    (req.user as any).phone = user.phone ?? null;
 
     next();
   } catch {

@@ -11,6 +11,7 @@ export const BillingType = {
 export const BillingStatus = {
   PENDING: "PENDING",
   PAID: "PAID",
+  COMPLETED: "COMPLETED",
   ACTIVE: "ACTIVE",
   FAILED: "FAILED",
   CANCELED: "CANCELED",
@@ -29,6 +30,11 @@ export interface BillingDoc {
   stripeSubscriptionId: string | null;
   stripeCheckoutId: string | null;
   stripeInvoiceId: string | null;
+  stripePaymentIntentId: string | null;
+  stripeChargeId: string | null;
+  transactionId: string | null;
+  invoiceUrl: string | null;
+  paidAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -72,7 +78,12 @@ const billingSchema = new Schema<BillingDoc>(
     stripeCustomerId: { type: String, default: null },
     stripeSubscriptionId: { type: String, default: null, index: true },
     stripeCheckoutId: { type: String, default: null },
-    stripeInvoiceId: { type: String, default: null },
+    stripeInvoiceId: { type: String, default: null, index: true },
+    stripePaymentIntentId: { type: String, default: null, index: true },
+    stripeChargeId: { type: String, default: null },
+    transactionId: { type: String, default: null, index: true },
+    invoiceUrl: { type: String, default: null },
+    paidAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -90,6 +101,10 @@ billingSchema.index(
 billingSchema.index(
   { stripeInvoiceId: 1 },
   { unique: true, partialFilterExpression: { stripeInvoiceId: { $type: "string" } } }
+);
+billingSchema.index(
+  { transactionId: 1 },
+  { unique: true, partialFilterExpression: { transactionId: { $type: "string" } } }
 );
 
 applyDocSerializer(billingSchema);

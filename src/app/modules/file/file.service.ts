@@ -4,6 +4,7 @@ import { Folder } from "../../../models/Folder";
 import { File } from "../../../models/File";
 import { Tenant } from "../../../models/Tenant";
 import { withTransaction } from "../../../utils/transaction";
+import { AuditAction, logAudit, type AuditContext } from "../../middlewares/audit.middleware";
 
 interface CreateFilePayload {
   name: string;
@@ -24,8 +25,36 @@ interface UpdateFilePayload {
   path?: string;
 }
 
+const buildAuditCtx = (ctx: AuditContext, file: any): AuditContext => ({
+  ...ctx,
+  tenantId: ctx.tenantId || file?.tenantId?.toString() || null,
+});
+
+// Auto-rename on duplicate: "report.pdf" -> "report (1).pdf" -> "report (2).pdf"
+const ensureUniqueName = async (
+  tenantId: string,
+  folderId: string | null,
+  name: string
+): Promise<string> => {
+  const exists = (n: string) =>
+    File.exists({ tenantId, folderId, name: n });
+
+  if (!(await exists(name))) return name;
+
+  const ext = name.includes(".") ? (name.match(/\.[^.]+$/) ?? [""])[0] : "";
+  const base = ext ? name.slice(0, -ext.length) : name;
+
+  let counter = 1;
+  let candidate = `${base} (${counter})${ext}`;
+  while (await exists(candidate)) {
+    counter += 1;
+    candidate = `${base} (${counter})${ext}`;
+  }
+  return candidate;
+};
+
 // ─── Create ────────────────────────────────────────────────────────────────────
-const createFile = async (payload: CreateFilePayload) => {
+const createFile = async (payload: CreateFilePayload, auditCtx: AuditContext) => {
   const { name, tenantId, folderId, path, size, mimeType, url, publicId } =
     payload;
 
@@ -37,20 +66,13 @@ const createFile = async (payload: CreateFilePayload) => {
     }
   }
 
-  // Duplicate name check (backed by compound index tenantId+name+folderId)
-  const existing = await File.findOne({
+  // Duplicate names in the same location are auto-renamed (backed by compound
+  // index tenantId+name+folderId).
+  const resolvedName = await ensureUniqueName(
     tenantId,
-    name,
-    folderId: folderId ? folderId : null,
-  })
-    .select("_id")
-    .lean();
-  if (existing) {
-    throw new AppError(
-      "File with this name already exists in the same location",
-      httpStatus.CONFLICT
-    );
-  }
+    folderId ? folderId : null,
+    name
+  );
 
   // Atomic: charge storage + persist the file record together.
   const file = await withTransaction(async (session) => {
@@ -63,7 +85,7 @@ const createFile = async (payload: CreateFilePayload) => {
     const [created] = await File.create(
       [
         {
-          name,
+          name: resolvedName,
           size,
           mimeType,
           url,
@@ -79,7 +101,17 @@ const createFile = async (payload: CreateFilePayload) => {
     return created;
   });
 
-  return file.toJSON();
+  const fileObj = file.toJSON();
+  await logAudit({
+    ...buildAuditCtx(auditCtx, file),
+    action: AuditAction.FILE_UPLOAD,
+    resource: "file",
+    resourceId: fileObj.id,
+    status: "SUCCESS",
+    details: { name: resolvedName, size, mimeType },
+  });
+
+  return fileObj;
 };
 
 // ─── Get All (by tenant) ────────────────────────────────────────────────────────
@@ -104,7 +136,7 @@ const getFileById = async (id: string, tenantId: string) => {
 };
 
 // ─── Update ────────────────────────────────────────────────────────────────────
-const updateFile = async (payload: UpdateFilePayload) => {
+const updateFile = async (payload: UpdateFilePayload, auditCtx: AuditContext) => {
   const { id, tenantId, ...updateData } = payload;
 
   const file = await File.findById(id).lean();
@@ -121,7 +153,7 @@ const updateFile = async (payload: UpdateFilePayload) => {
       folderId: file.folderId,
       _id: { $ne: id },
     })
-      .select("_id")
+      .select("_ID")
       .lean();
 
     if (duplicate) {
@@ -134,12 +166,22 @@ const updateFile = async (payload: UpdateFilePayload) => {
 
   const updated = await File.findByIdAndUpdate(id, updateData, { new: true });
 
-  return updated;
+  const updatedObj = updated?.toJSON();
+  await logAudit({
+    ...buildAuditCtx(auditCtx, file),
+    action: AuditAction.FILE_UPDATE,
+    resource: "file",
+    resourceId: id,
+    status: "SUCCESS",
+    details: { updatedFields: Object.keys(updateData) },
+  });
+
+  return updatedObj;
 };
 
 // ─── Delete (soft) ─────────────────────────────────────────────────────────────
 // Atomic: release storage + soft-delete the record.
-const deleteFile = async (id: string, tenantId: string) => {
+const deleteFile = async (id: string, tenantId: string, auditCtx: AuditContext) => {
   const file = await File.findById(id).lean();
 
   if (!file || file.tenantId.toString() !== tenantId) {
@@ -158,6 +200,15 @@ const deleteFile = async (id: string, tenantId: string) => {
       { $set: { deletedAt: new Date() } },
       { session }
     );
+  });
+
+  await logAudit({
+    ...buildAuditCtx(auditCtx, file),
+    action: AuditAction.FILE_DELETE,
+    resource: "file",
+    resourceId: id,
+    status: "SUCCESS",
+    details: { name: file.name, size: file.size, mimeType: file.mimeType },
   });
 
   return { message: "File deleted successfully" };

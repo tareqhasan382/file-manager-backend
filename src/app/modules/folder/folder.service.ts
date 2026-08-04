@@ -3,6 +3,7 @@ import { AppError } from "../../../utils/app_error";
 import httpStatus from "http-status";
 import { Folder } from "../../../models/Folder";
 import { File } from "../../../models/File";
+import { AuditAction, logAudit, type AuditContext } from "../../middlewares/audit.middleware";
 
 interface CreateFolderPayload {
   name: string;
@@ -45,7 +46,7 @@ const FILE_PROJECTION = {
 };
 
 // ─── Create ────────────────────────────────────────────────────────────────────
-const createFolder = async (payload: CreateFolderPayload) => {
+const createFolder = async (payload: CreateFolderPayload, auditCtx: AuditContext) => {
   const { name, tenantId, parentId, path } = payload;
 
   // Validate parent belongs to same tenant
@@ -57,7 +58,6 @@ const createFolder = async (payload: CreateFolderPayload) => {
   }
 
   // Duplicate name check in the same parent
-  // (enforced concurrently by the partial unique index)
   const existing = await Folder.findOne({
     tenantId,
     name,
@@ -79,12 +79,20 @@ const createFolder = async (payload: CreateFolderPayload) => {
     path,
   });
 
-  return folder.toJSON();
+  const folderObj = folder.toJSON();
+  await logAudit({
+    ...auditCtx,
+    action: AuditAction.FOLDER_CREATE,
+    resource: "folder",
+    resourceId: folderObj.id,
+    status: "SUCCESS",
+    details: { name, parentId: parentId || null },
+  });
+
+  return folderObj;
 };
 
 // ─── Get All (by tenant) ────────────────────────────────────────────────────────
-// One aggregation round-trip: folders + their children + their files.
-// Avoids the N+1 "for each folder, load children/files" pattern.
 const getFolders = async (tenantId: string) => {
   const folders = await Folder.aggregate([
     { $match: { tenantId: new Types.ObjectId(tenantId), deletedAt: null } },
@@ -144,7 +152,6 @@ const getFolders = async (tenantId: string) => {
 
 // ─── Get Single ────────────────────────────────────────────────────────────────
 const getFolderById = async (id: string, tenantId: string) => {
-  // Three independent reads run in parallel (folder, its children, its files)
   const [folder, children, files] = await Promise.all([
     Folder.findById(id),
     Folder.find({ parentId: id }).sort({ createdAt: -1 }),
@@ -163,7 +170,7 @@ const getFolderById = async (id: string, tenantId: string) => {
 };
 
 // ─── Update ────────────────────────────────────────────────────────────────────
-const updateFolder = async (payload: UpdateFolderPayload) => {
+const updateFolder = async (payload: UpdateFolderPayload, auditCtx: AuditContext) => {
   const { id, tenantId, ...updateData } = payload;
 
   const folder = await Folder.findById(id).lean();
@@ -180,7 +187,7 @@ const updateFolder = async (payload: UpdateFolderPayload) => {
       parentId: folder.parentId,
       _id: { $ne: id },
     })
-      .select("_id")
+      .select("_ID")
       .lean();
 
     if (duplicate) {
@@ -195,11 +202,20 @@ const updateFolder = async (payload: UpdateFolderPayload) => {
     new: true,
   });
 
+  await logAudit({
+    ...auditCtx,
+    action: AuditAction.FOLDER_UPDATE,
+    resource: "folder",
+    resourceId: id,
+    status: "SUCCESS",
+    details: { updatedFields: Object.keys(updateData) },
+  });
+
   return updated;
 };
 
 // ─── Delete (soft) ─────────────────────────────────────────────────────────────
-const deleteFolder = async (id: string, tenantId: string) => {
+const deleteFolder = async (id: string, tenantId: string, auditCtx: AuditContext) => {
   const folder = await Folder.findById(id);
 
   if (!folder || folder.tenantId.toString() !== tenantId) {
@@ -220,6 +236,15 @@ const deleteFolder = async (id: string, tenantId: string) => {
   }
 
   await folder.softDelete();
+
+  await logAudit({
+    ...auditCtx,
+    action: AuditAction.FOLDER_DELETE,
+    resource: "folder",
+    resourceId: id,
+    status: "SUCCESS",
+    details: { name: folder.name },
+  });
 
   return { message: "Folder deleted successfully" };
 };

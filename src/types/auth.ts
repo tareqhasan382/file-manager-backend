@@ -6,4 +6,6 @@ export interface AuthUser {
   tenantId: string;
   email: string;
   role: Role;
+  avatar?: string | null;
+  phone?: string | null;
 }

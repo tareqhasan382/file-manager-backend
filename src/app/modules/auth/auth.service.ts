@@ -68,6 +68,7 @@ const issueTokens = async (user: {
     refreshToken,
     userId: user._id.toString(),
     role: user.role,
+    tenantId: user.tenantId.toString(),
     isPaidPlan: (tenant?.plan ?? Plan.FREE) !== Plan.FREE,
     subscribtionPlan: tenant?.plan ?? Plan.FREE,
   };
@@ -406,7 +407,9 @@ export const resetPassword = async ({
 // stale/deleted account is logged out immediately.
 export const getMe = async (userId: string) => {
   const user = await User.findOne({ _id: userId })
-    .select("email role fullName tenantId isVerified")
+    .select(
+      "email role fullName tenantId isVerified avatar phone designation bio address city country"
+    )
     .lean();
 
   if (!user) {
@@ -430,6 +433,13 @@ export const getMe = async (userId: string) => {
     email: user.email,
     role: user.role,
     fullName: user.fullName,
+    avatar: user.avatar ?? null,
+    phone: user.phone ?? null,
+    designation: user.designation ?? null,
+    bio: user.bio ?? null,
+    address: user.address ?? null,
+    city: user.city ?? null,
+    country: user.country ?? null,
     isVerified: user.isVerified ?? false,
     tenant: {
       id: tenant._id.toString(),

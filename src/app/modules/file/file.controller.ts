@@ -3,13 +3,15 @@ import httpStatus from "http-status";
 import catchAsync from "../../../shared/catchAsync";
 import { sendResponse } from "../../../shared/sendResponse";
 import { fileServices } from "./file.service";
+import { getAuditContext } from "../../middlewares/audit.middleware";
 
 // ─── Create ────────────────────────────────────────────────────────────────────
 const createFile = catchAsync(async (req: Request, res: Response) => {
   const { tenantId } = req.user!;
-  // console.log("tenantId---------->",tenantId)
-  // console.log("data---------->",req.body)
-  const file = await fileServices.createFile({ ...req.body, tenantId });
+  const file = await fileServices.createFile(
+    { ...req.body, tenantId },
+    getAuditContext(req)
+  );
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -51,7 +53,10 @@ const getFileById = catchAsync(async (req: Request, res: Response) => {
 const updateFile = catchAsync(async (req: Request, res: Response) => {
   const { tenantId } = req.user!;
   const id = req.params.id as string;
-  const file = await fileServices.updateFile({ id, tenantId, ...req.body });
+  const file = await fileServices.updateFile(
+    { id, tenantId, ...req.body },
+    getAuditContext(req)
+  );
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -66,7 +71,7 @@ const deleteFile = catchAsync(async (req: Request, res: Response) => {
   const { tenantId } = req.user!;
   const id = req.params.id as string;
 
-  const result = await fileServices.deleteFile(id, tenantId);
+  const result = await fileServices.deleteFile(id, tenantId, getAuditContext(req));
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

@@ -7,7 +7,6 @@ import userRoute from "../modules/user/user.route";
 import memberRoute from "../modules/member/member.route";
 import superAdminRoute from "../modules/tenant/superadmin.route";
 
-
 const router = express.Router();
 router.use("/admin", superAdminRoute);
 router.use("/auth", authRoute);

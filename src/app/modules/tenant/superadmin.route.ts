@@ -3,7 +3,7 @@ import { authMiddleware } from "../../middlewares/auth.middleware";
 import { roleMiddleware } from "../../middlewares/role.middleware";
 import { superAdminControllers } from "./superadmin.controller";
 import validateRequest from "../../middlewares/validateRequest";
-import { changePlanSchema, tenantParamSchema } from "./superadmin.validation";
+import { changePlanSchema, tenantParamSchema, userSchema } from "./superadmin.validation";
 
 const superAdminRoute = Router();
 
@@ -22,6 +22,12 @@ superAdminRoute.get(
   superAdminControllers.getTenantById
 );
 
+superAdminRoute.get(
+  "/tenants/:id/billing",
+  validateRequest(tenantParamSchema),
+  superAdminControllers.getTenantBilling
+);
+
 superAdminRoute.put(
   "/tenants/:id/ban",
   validateRequest(tenantParamSchema),
@@ -37,7 +43,16 @@ superAdminRoute.put(
 // ─── Users ────────────────────────────────────────────────────────────────────
 superAdminRoute.get("/users", superAdminControllers.getAllUsers);
 
+superAdminRoute.get(
+  "/users/:id",
+  validateRequest(userSchema),
+  superAdminControllers.getUserDetail
+);
+
 // ─── Billing Ledger ───────────────────────────────────────────────────────────
 superAdminRoute.get("/billing", superAdminControllers.getAllBilling);
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+superAdminRoute.get("/audit-logs", superAdminControllers.getAuditLogs);
 
 export default superAdminRoute;

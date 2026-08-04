@@ -9,6 +9,13 @@ export interface UserDoc extends SoftDeleteDocument {
   password: string;
   role: (typeof Role)[keyof typeof Role];
   fullName: string;
+  avatar: string | null;
+  phone: string | null;
+  designation: string | null;
+  bio: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
   isVerified: boolean;
   verificationCode: string | null;
   verificationCodeExpires: Date | null;
@@ -39,6 +46,13 @@ const userSchema = new Schema<UserDoc>(
     password: { type: String, required: true, select: false },
     role: { type: String, enum: Object.values(Role), required: true },
     fullName: { type: String, trim: true, default: "" },
+    avatar: { type: String, default: null },
+    phone: { type: String, default: null, trim: true },
+    designation: { type: String, default: null, trim: true },
+    bio: { type: String, default: null, trim: true },
+    address: { type: String, default: null, trim: true },
+    city: { type: String, default: null, trim: true },
+    country: { type: String, default: null, trim: true },
     // Email verification (OTP). New signups start unverified and can't log in.
     isVerified: { type: Boolean, default: false, index: true },
     // OTP codes are stored hashed (bcrypt) and never exposed via the API.

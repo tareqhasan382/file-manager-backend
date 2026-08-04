@@ -3,12 +3,15 @@ import httpStatus from "http-status";
 import catchAsync from "../../../shared/catchAsync";
 import { sendResponse } from "../../../shared/sendResponse";
 import { folderServices } from "./folder.service";
-
+import { getAuditContext } from "../../middlewares/audit.middleware";
 
 // ─── Create ────────────────────────────────────────────────────────────────────
 const createFolder = catchAsync(async (req: Request, res: Response) => {
   const { tenantId } = req.user!;
-  const folder = await folderServices.createFolder({ ...req.body, tenantId });
+  const folder = await folderServices.createFolder(
+    { ...req.body, tenantId },
+    getAuditContext(req)
+  );
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -48,11 +51,14 @@ const getFolderById = catchAsync(async (req: Request, res: Response) => {
 // ─── Update ────────────────────────────────────────────────────────────────────
 const updateFolder = catchAsync(async (req: Request, res: Response) => {
   const { tenantId } = req.user!;
-  const folder = await folderServices.updateFolder({
-    id: req.params.id,
-    tenantId,
-    ...req.body,
-  });
+  const folder = await folderServices.updateFolder(
+    {
+      id: req.params.id,
+      tenantId,
+      ...req.body,
+    },
+    getAuditContext(req)
+  );
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -66,7 +72,7 @@ const updateFolder = catchAsync(async (req: Request, res: Response) => {
 const deleteFolder = catchAsync(async (req: Request, res: Response) => {
   const { tenantId } = req.user!;
   const id = req.params.id as string;
-  const result = await folderServices.deleteFolder(id, tenantId);
+  const result = await folderServices.deleteFolder(id, tenantId, getAuditContext(req));
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

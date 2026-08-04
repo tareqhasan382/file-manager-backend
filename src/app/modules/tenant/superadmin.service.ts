@@ -7,6 +7,8 @@ import { File } from "../../../models/File";
 import { Folder } from "../../../models/Folder";
 import { Billing, BillingStatus, BillingType } from "../../../models/Billing";
 import { Plan } from "../../enums";
+import { AuditAction, logAudit, type AuditContext } from "../../middlewares/audit.middleware";
+import { auditLogService } from "../auditlog/auditlog.service";
 
 const TENANT_COUNT_PROJECTION = {
   id: { $toString: "$_id" },
@@ -135,7 +137,7 @@ const getTenantById = async (id: string) => {
 };
 
 // ─── Ban / Unban Tenant ───────────────────────────────────────────────────────
-const toggleBanTenant = async (id: string) => {
+const toggleBanTenant = async (id: string, auditCtx?: AuditContext) => {
   const tenant = await Tenant.findById(id);
 
   if (!tenant) {
@@ -148,6 +150,17 @@ const toggleBanTenant = async (id: string) => {
     { new: true }
   );
 
+  const action = updated!.isBanned ? AuditAction.TENANT_BAN : AuditAction.TENANT_UNBAN;
+  await logAudit({
+    ...(auditCtx || { actorId: null, actorEmail: "system", actorRole: "SYSTEM", tenantId: null, ipAddress: "api", userAgent: "" }),
+    action,
+    resource: "tenant",
+    resourceId: id,
+    tenantId: id,
+    status: "SUCCESS",
+    details: { isBanned: updated!.isBanned, tenantName: tenant.name },
+  });
+
   return {
     message: updated!.isBanned
       ? `Tenant "${tenant.name}" has been banned`
@@ -157,7 +170,7 @@ const toggleBanTenant = async (id: string) => {
 };
 
 // ─── Change Tenant Plan ───────────────────────────────────────────────────────
-const changeTenantPlan = async (id: string, plan: string) => {
+const changeTenantPlan = async (id: string, plan: string, auditCtx?: AuditContext) => {
   const tenant = await Tenant.findById(id);
 
   if (!tenant) {
@@ -179,6 +192,16 @@ const changeTenantPlan = async (id: string, plan: string) => {
       amount: 0,
       currency: "usd",
       description: `Plan changed by admin: ${tenant.plan} → ${updated.plan}`,
+    });
+
+    await logAudit({
+      ...(auditCtx || { actorId: null, actorEmail: "system", actorRole: "SYSTEM", tenantId: null, ipAddress: "api", userAgent: "" }),
+      action: AuditAction.PLAN_CHANGE,
+      resource: "tenant",
+      resourceId: id,
+      tenantId: id,
+      status: "SUCCESS",
+      details: { previousPlan: tenant.plan, newPlan: updated!.plan },
     });
   }
 
@@ -309,18 +332,29 @@ const getAllBilling = async () => {
         totalRevenue: [
           {
             $match: {
-              status: BillingStatus.PAID,
+              status: { $in: [BillingStatus.PAID, BillingStatus.COMPLETED] },
               type: BillingType.PAYMENT,
             },
           },
           { $group: { _id: null, total: { $sum: "$amount" } } },
         ],
         paidPayments: [
-          { $match: { status: BillingStatus.PAID, type: BillingType.PAYMENT } },
+          {
+            $match: {
+              status: { $in: [BillingStatus.PAID, BillingStatus.COMPLETED] },
+              type: BillingType.PAYMENT,
+            },
+          },
           { $count: "count" },
         ],
         activeSubscriptions: [
-          { $match: { status: BillingStatus.ACTIVE } },
+          {
+            $match: {
+              status: BillingStatus.ACTIVE,
+              stripeSubscriptionId: { $ne: null },
+            },
+          },
+          { $group: { _id: "$stripeSubscriptionId" } },
           { $count: "count" },
         ],
         failedPayments: [
@@ -348,6 +382,117 @@ const getAllBilling = async () => {
   };
 };
 
+// ─── Get User Detail (admin) ──────────────────────────────────────────────────
+const getUserDetail = async (userId: string) => {
+  const user = await User.findById(userId)
+    .select(
+      "id email fullName role avatar phone isVerified createdAt updatedAt"
+    )
+    .populate("tenantId", "name plan subscriptionStatus isBanned storageUsed createdAt updatedAt")
+    .lean();
+
+  if (!user) {
+    throw new AppError("User not found", httpStatus.NOT_FOUND);
+  }
+
+  const billing = await Billing.find({ tenantId: user.tenantId })
+    .sort({ createdAt: -1 })
+    .limit(50)
+    .lean();
+
+  return {
+    user,
+    billing,
+  };
+};
+
+// ─── Get Tenant Billing History (admin) ───────────────────────────────────────
+const getTenantBilling = async (tenantId: string) => {
+  const tenant = await Tenant.findById(tenantId).lean();
+  if (!tenant) {
+    throw new AppError("Tenant not found", httpStatus.NOT_FOUND);
+  }
+
+  const records = await Billing.find({ tenantId })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const [summary] = await Billing.aggregate([
+    { $match: { tenantId: new Types.ObjectId(tenantId) } },
+    {
+      $facet: {
+        totalRecords: [{ $count: "count" }],
+        totalSpent: [
+          {
+            $match: {
+              status: { $in: [BillingStatus.PAID, BillingStatus.COMPLETED] },
+              type: BillingType.PAYMENT,
+            },
+          },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ],
+        paidPayments: [
+          {
+            $match: {
+              status: { $in: [BillingStatus.PAID, BillingStatus.COMPLETED] },
+              type: BillingType.PAYMENT,
+            },
+          },
+          { $count: "count" },
+        ],
+        pendingCheckouts: [
+          { $match: { status: BillingStatus.PENDING } },
+          { $count: "count" },
+        ],
+        failedPayments: [
+          { $match: { status: BillingStatus.FAILED } },
+          { $count: "count" },
+        ],
+      },
+    },
+  ]);
+
+  return {
+    tenant: {
+      id: tenant._id.toString(),
+      name: tenant.name,
+      plan: tenant.plan,
+      subscriptionStatus: tenant.subscriptionStatus,
+      isBanned: tenant.isBanned,
+      stripeCustomerId: tenant.stripeCustomerId,
+      storageUsed: tenant.storageUsed,
+      createdAt: tenant.createdAt,
+      updatedAt: tenant.updatedAt,
+    },
+    records,
+    summary: {
+      totalRecords: summary?.totalRecords?.[0]?.count ?? 0,
+      totalSpent: summary?.totalSpent?.[0]?.total ?? 0,
+      paidPayments: summary?.paidPayments?.[0]?.count ?? 0,
+      pendingCheckouts: summary?.pendingCheckouts?.[0]?.count ?? 0,
+      failedPayments: summary?.failedPayments?.[0]?.count ?? 0,
+    },
+  };
+};
+
+const getAuditLogs = async (query: any) => {
+  return auditLogService.getAllAuditLogs({
+    filters: {
+      action: query.action,
+      resource: query.resource,
+      status: query.status,
+      tenantId: query.tenantId,
+      actorId: query.actorId,
+      ipAddress: query.ipAddress,
+      dateFrom: query.dateFrom,
+      dateTo: query.dateTo,
+      search: query.search,
+    },
+    page: query.page ? Number(query.page) : 1,
+    limit: query.limit ? Number(query.limit) : 50,
+  });
+};
+
 export const superAdminServices = {
   getAllTenants,
   getTenantById,
@@ -356,4 +501,7 @@ export const superAdminServices = {
   getAllUsers,
   getStats,
   getAllBilling,
+  getUserDetail,
+  getTenantBilling,
+  getAuditLogs,
 };
