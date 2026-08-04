@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zodObjectId } from "../../../shared/zod/objectId";
 
 export const createMemberSchema = z.object({
   body: z.object({
@@ -18,6 +19,6 @@ export const createMemberSchema = z.object({
 
 export const memberParamSchema = z.object({
   params: z.object({
-    id: z.string().uuid("Invalid member ID"),
+    id: zodObjectId,
   }),
 });

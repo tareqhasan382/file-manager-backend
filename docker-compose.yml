@@ -1,23 +1,19 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: file-system-postgres
+  mongo:
+    image: mongo:7
+    container_name: file-system-mongo
     restart: always
-    env_file:
-      - .env
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Single-node replica set enables multi-document transactions
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
-      - "5434:5432"   # maps container 5432 → host 5434
+      - "27017:27017"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mongo_data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand('ping').ok"]
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
-  postgres_data:
+  mongo_data:

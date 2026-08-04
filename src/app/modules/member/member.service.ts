@@ -1,24 +1,17 @@
-import { prisma } from "../../../lib/prisma";
 import { AppError } from "../../../utils/app_error";
 import httpStatus from "http-status";
-import { Role } from "../../../generated/prisma/enums";
 import bcrypt from "bcrypt";
+import { User } from "../../../models/User";
+import { Role } from "../../enums";
 
 // ─── Get All Members ──────────────────────────────────────────────────────────
 const getMembers = async (tenantId: string) => {
-  const members = await prisma.user.findMany({
-    where: {
-      tenantId,
-      role: { in: ["ADMIN", "MEMBER"] },
-    },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const members = await User.find({
+    tenantId,
+    role: { $in: [Role.ADMIN, Role.MEMBER] },
+  })
+    .select("id email role fullName createdAt updatedAt")
+    .sort({ createdAt: -1 });
 
   return members;
 };
@@ -35,7 +28,7 @@ const createMember = async ({
   password: string;
   role: "ADMIN" | "MEMBER";
 }) => {
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const existing = await User.findOne({ email }).select("_id").lean();
   if (existing) {
     throw new AppError(
       "User with this email already exists",
@@ -45,37 +38,32 @@ const createMember = async ({
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const member = await prisma.user.create({
-    data: {
-      tenantId,
-      email,
-      password: hashedPassword,
-      role: role as Role,
-    },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      createdAt: true,
-    },
+  const member = await User.create({
+    tenantId,
+    email,
+    password: hashedPassword,
+    role,
+    fullName: "",
   });
 
-  return member;
+  return await User.findById(member._id).select(
+    "id email role fullName createdAt updatedAt"
+  );
 };
 
 // ─── Delete Member (OWNER only) ───────────────────────────────────────────────
 const deleteMember = async (id: string, tenantId: string) => {
-  const member = await prisma.user.findUnique({ where: { id } });
+  const member = await User.findById(id);
 
-  if (!member || member.tenantId !== tenantId) {
+  if (!member || member.tenantId.toString() !== tenantId) {
     throw new AppError("Member not found", httpStatus.NOT_FOUND);
   }
 
-  if (member.role === "OWNER") {
+  if (member.role === Role.OWNER) {
     throw new AppError("Cannot remove the OWNER", httpStatus.FORBIDDEN);
   }
 
-  await prisma.user.delete({ where: { id } });
+  await member.softDelete();
 
   return { message: "Member removed successfully" };
 };

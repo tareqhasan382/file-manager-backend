@@ -37,4 +37,7 @@ superAdminRoute.put(
 // ─── Users ────────────────────────────────────────────────────────────────────
 superAdminRoute.get("/users", superAdminControllers.getAllUsers);
 
+// ─── Billing Ledger ───────────────────────────────────────────────────────────
+superAdminRoute.get("/billing", superAdminControllers.getAllBilling);
+
 export default superAdminRoute;

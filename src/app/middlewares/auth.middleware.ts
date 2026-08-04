@@ -3,8 +3,7 @@ import jwt, { JwtPayload, Secret } from "jsonwebtoken";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
 import config from "../../config";
-import { prisma } from "../../lib/prisma";
-
+import { User } from "../../models/User";
 
 export const authMiddleware = async (
   req: Request,
@@ -27,22 +26,29 @@ export const authMiddleware = async (
       token,
       config.jwt.secret as Secret
     ) as JwtPayload;
-    //console.log("verifiedUser--------->", verifiedUser)
-    const user = await prisma.user.findUnique({
-      where: { id: verifiedUser.userId },
-      select: { id: true, email: true, role: true, tenantId: true },
-    });
+
+    // Always re-validate against the DB so banned/deleted users
+    // and role changes take effect immediately (soft-deleted users are filtered).
+    const user = await User.findOne({
+      _id: verifiedUser.userId,
+    })
+      .select("id email role tenantId fullName")
+      .lean();
 
     if (!user) {
       throw new AppError("User no longer exists", httpStatus.UNAUTHORIZED);
     }
-   // console.log("user--------->", user)
-    req.user = user;
-    req.user = verifiedUser;
+
+    req.user = {
+      id: user._id.toString(),
+      userId: user._id.toString(),
+      email: user.email,
+      role: user.role,
+      tenantId: user.tenantId.toString(),
+    };
 
     next();
   } catch {
-
     throw new AppError("Invalid or expired token", httpStatus.UNAUTHORIZED);
   }
 };

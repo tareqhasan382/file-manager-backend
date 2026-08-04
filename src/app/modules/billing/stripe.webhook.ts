@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
 import Stripe from "stripe";
+import { Types } from "mongoose";
 import { stripe } from "../../../lib/stripe";
-import { prisma } from "../../../lib/prisma";
+import { Tenant } from "../../../models/Tenant";
+import { Billing, BillingStatus, BillingType } from "../../../models/Billing";
 import config from "../../../config";
-import { Plan, SubscriptionStatus } from "../../../generated/prisma/enums";
+import { Plan, SubscriptionStatus } from "../../enums";
 import {
   subscriptionActivatedEmail,
   paymentFailedEmail,
@@ -12,12 +14,42 @@ import {
 } from "../../../lib/emailtemplates";
 import { sendEmail } from "../../../lib/email";
 
-// ─── Helper: get tenant with owner email ─────────────
+// ─── Helper: tenant + owner email in one aggregation (no N+1) ─────────────────
 const getTenantWithOwner = async (subscriptionId: string) => {
-  return prisma.tenant.findFirst({
-    where: { subscriptionId },
-    include: { users: { where: { role: "OWNER" } } },
-  });
+  const [result] = await Tenant.aggregate([
+    { $match: { subscriptionId, deletedAt: null } },
+    {
+      $lookup: {
+        from: "users",
+        let: { tid: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ["$tenantId", "$$tid"] },
+              role: "OWNER",
+              deletedAt: null,
+            },
+          },
+          { $limit: 1 },
+          { $project: { _id: 0, email: 1 } },
+        ],
+        as: "owner",
+      },
+    },
+    { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id: 1,
+        name: 1,
+        plan: 1,
+        ownerEmail: "$owner.email",
+      },
+    },
+  ]);
+
+  return result
+    ? { id: result._id.toString(), name: result.name, plan: result.plan, ownerEmail: result.ownerEmail }
+    : null;
 };
 
 export const stripeWebhook = async (req: Request, res: Response) => {
@@ -48,35 +80,116 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         const priceId = subscription.items.data[0].price.id;
 
         const priceMap: Record<string, string> = {
-          [config.stripe.plans.silver]: "SILVER",
-          [config.stripe.plans.gold]: "GOLD",
-          [config.stripe.plans.diamond]: "DIAMOND",
+          [config.stripe.plans.silver]: Plan.SILVER,
+          [config.stripe.plans.gold]: Plan.GOLD,
+          [config.stripe.plans.diamond]: Plan.DIAMOND,
         };
-        const plan = priceMap[priceId] ?? session.metadata?.plan ?? "FREE";
+        const plan = priceMap[priceId] ?? session.metadata?.plan ?? Plan.FREE;
 
-        // ─── Prisma transaction ───────────────────────────
-        const tenant = await prisma.$transaction(async (tx) => {
-          return tx.tenant.update({
-            where: { id: tenantId },
-            data: {
-              plan: plan as Plan,
-              subscriptionId,
-              subscriptionStatus: "ACTIVE" as SubscriptionStatus,
+        const [tenantWithOwner] = await Tenant.aggregate([
+          { $match: { _id: new Types.ObjectId(tenantId), deletedAt: null } },
+          {
+            $lookup: {
+              from: "users",
+              let: { tid: "$_id" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: ["$tenantId", "$$tid"] },
+                    role: "OWNER",
+                    deletedAt: null,
+                  },
+                },
+                { $limit: 1 },
+                { $project: { _id: 0, email: 1 } },
+              ],
+              as: "owner",
             },
-            include: { users: { where: { role: "OWNER" } } },
-          });
-        });
+          },
+          { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
+          { $project: { _id: 0, name: 1, ownerEmail: "$owner.email" } },
+        ]);
 
-        const ownerEmail = tenant.users[0]?.email;
-        if (ownerEmail) {
+        await Tenant.updateOne(
+          { _id: tenantId },
+          {
+            $set: {
+              plan,
+              subscriptionId,
+              subscriptionStatus: SubscriptionStatus.ACTIVE,
+            },
+          }
+        );
+
+        // Persist the completed checkout in the billing ledger
+        await Billing.updateOne(
+          { stripeCheckoutId: session.id },
+          {
+            $set: {
+              status: BillingStatus.ACTIVE,
+              plan,
+              amount: session.amount_total ?? 0,
+              currency: session.currency ?? "usd",
+              stripeSubscriptionId: subscriptionId,
+              stripeCustomerId: session.customer ?? null,
+              description: `Subscription activated: ${plan} plan`,
+            },
+            $setOnInsert: {
+              tenantId,
+              type: BillingType.CHECKOUT,
+            },
+          },
+          { upsert: true }
+        );
+
+        if (tenantWithOwner?.name && tenantWithOwner.ownerEmail) {
           const { subject, html } = subscriptionActivatedEmail({
-            name: tenant.name,
+            name: tenantWithOwner.name,
             plan,
           });
-          await sendEmail({ to: ownerEmail, subject, html });
+          await sendEmail({
+            to: tenantWithOwner.ownerEmail,
+            subject,
+            html,
+          }).catch((err) => console.error("Webhook email failed:", err));
         }
 
         console.log(`Tenant ${tenantId} → ACTIVE, plan: ${plan}`);
+        break;
+      }
+
+      case "checkout.session.expired": {
+        const session = event.data.object as Stripe.Checkout.Session;
+
+        // Find the pending checkout we recorded at initiation.
+        const pending = await Billing.findOne({
+          stripeCheckoutId: session.id,
+          type: BillingType.CHECKOUT,
+          status: BillingStatus.PENDING,
+        }).lean();
+
+        if (pending) {
+          // Revert the tenant to the plan they were on before the upgrade.
+          const fallbackPlan = pending.previousPlan ?? Plan.FREE;
+          await Tenant.updateOne(
+            { _id: pending.tenantId },
+            {
+              $set: {
+                plan: fallbackPlan,
+                subscriptionStatus: SubscriptionStatus.ACTIVE,
+              },
+            }
+          );
+
+          await Billing.updateOne(
+            { _id: pending._id },
+            { $set: { status: BillingStatus.CANCELED } }
+          );
+
+          console.log(
+            `Checkout ${session.id} expired — tenant reverted to ${fallbackPlan}`
+          );
+        }
         break;
       }
 
@@ -84,24 +197,42 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         const subscription = event.data.object as Stripe.Subscription;
         const tenant = await getTenantWithOwner(subscription.id);
 
-        await prisma.$transaction(async (tx) => {
-          await tx.tenant.updateMany({
-            where: { subscriptionId: subscription.id },
-            data: {
-              plan: "FREE" as Plan,
+        await Tenant.updateOne(
+          { subscriptionId: subscription.id },
+          {
+            $set: {
+              plan: Plan.FREE,
               subscriptionId: null,
-              subscriptionStatus: "CANCELED" as SubscriptionStatus,
+              subscriptionStatus: SubscriptionStatus.CANCELED,
             },
-          });
-        });
+          }
+        );
 
-        const ownerEmail = tenant?.users[0]?.email;
-        if (tenant && ownerEmail) {
+        // Update every ledger row linked to this subscription
+        await Billing.updateMany(
+          { stripeSubscriptionId: subscription.id },
+          { $set: { status: BillingStatus.CANCELED } }
+        );
+
+        if (tenant) {
+          await Billing.create({
+            tenantId: tenant.id,
+            plan: Plan.FREE,
+            type: BillingType.SUBSCRIPTION,
+            status: BillingStatus.CANCELED,
+            amount: 0,
+            currency: "usd",
+            description: `Subscription canceled — reverted to FREE`,
+            stripeSubscriptionId: subscription.id,
+          });
+        }
+
+        if (tenant && tenant.ownerEmail) {
           const { subject, html } = subscriptionCanceledEmail({
             name: tenant.name,
             plan: tenant.plan,
           });
-          await sendEmail({ to: ownerEmail, subject, html });
+          await sendEmail({ to: tenant.ownerEmail, subject, html });
         }
 
         console.log(`Subscription ${subscription.id} → CANCELED`);
@@ -117,20 +248,37 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         if (subscriptionId) {
           const tenant = await getTenantWithOwner(subscriptionId);
 
-          await prisma.$transaction(async (tx) => {
-            await tx.tenant.updateMany({
-              where: { subscriptionId },
-              data: { subscriptionStatus: "PAST_DUE" as SubscriptionStatus },
-            });
-          });
+          await Tenant.updateOne(
+            { subscriptionId },
+            { $set: { subscriptionStatus: SubscriptionStatus.PAST_DUE } }
+          );
 
-          const ownerEmail = tenant?.users[0]?.email;
-          if (tenant && ownerEmail) {
+          await Billing.updateOne(
+            { stripeInvoiceId: invoice.id },
+            {
+              $set: {
+                status: BillingStatus.FAILED,
+                amount: invoice.amount_due ?? 0,
+                currency: invoice.currency ?? "usd",
+                stripeSubscriptionId: subscriptionId,
+              },
+              $setOnInsert: {
+                tenantId: tenant?.id,
+                plan: tenant?.plan ?? Plan.FREE,
+                type: BillingType.PAYMENT,
+                stripeCustomerId: invoice.customer ?? null,
+                description: `Payment failed (${tenant?.plan ?? "plan"} plan)`,
+              },
+            },
+            { upsert: true }
+          );
+
+          if (tenant && tenant.ownerEmail) {
             const { subject, html } = paymentFailedEmail({
               name: tenant.name,
               plan: tenant.plan,
             });
-            await sendEmail({ to: ownerEmail, subject, html });
+            await sendEmail({ to: tenant.ownerEmail, subject, html });
           }
 
           console.log(`Subscription ${subscriptionId} → PAST_DUE`);
@@ -147,20 +295,37 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         if (subscriptionId) {
           const tenant = await getTenantWithOwner(subscriptionId);
 
-          await prisma.$transaction(async (tx) => {
-            await tx.tenant.updateMany({
-              where: { subscriptionId },
-              data: { subscriptionStatus: "ACTIVE" as SubscriptionStatus },
-            });
-          });
+          await Tenant.updateOne(
+            { subscriptionId },
+            { $set: { subscriptionStatus: SubscriptionStatus.ACTIVE } }
+          );
 
-          const ownerEmail = tenant?.users[0]?.email;
-          if (tenant && ownerEmail) {
+          await Billing.updateOne(
+            { stripeInvoiceId: invoice.id },
+            {
+              $set: {
+                status: BillingStatus.PAID,
+                amount: invoice.amount_paid ?? 0,
+                currency: invoice.currency ?? "usd",
+                stripeSubscriptionId: subscriptionId,
+              },
+              $setOnInsert: {
+                tenantId: tenant?.id,
+                plan: tenant?.plan ?? Plan.FREE,
+                type: BillingType.PAYMENT,
+                stripeCustomerId: invoice.customer ?? null,
+                description: `Payment received (${tenant?.plan ?? "plan"} plan)`,
+              },
+            },
+            { upsert: true }
+          );
+
+          if (tenant && tenant.ownerEmail) {
             const { subject, html } = subscriptionRenewedEmail({
               name: tenant.name,
               plan: tenant.plan,
             });
-            await sendEmail({ to: ownerEmail, subject, html });
+            await sendEmail({ to: tenant.ownerEmail, subject, html });
           }
 
           console.log(`Subscription ${subscriptionId} → ACTIVE (renewed)`);

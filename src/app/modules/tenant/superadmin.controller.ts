@@ -82,6 +82,18 @@ const getStats = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+// ─── Billing Ledger ───────────────────────────────────────────────────────────
+const getAllBilling = catchAsync(async (req: Request, res: Response) => {
+  const billing = await superAdminServices.getAllBilling();
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Billing ledger fetched successfully",
+    data: billing,
+  });
+});
+
 export const superAdminControllers = {
   getAllTenants,
   getTenantById,
@@ -89,4 +101,5 @@ export const superAdminControllers = {
   changeTenantPlan,
   getAllUsers,
   getStats,
+  getAllBilling,
 };

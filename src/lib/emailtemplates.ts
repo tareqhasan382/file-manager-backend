@@ -215,3 +215,49 @@ export const welcomeEmail = ({
     ${button("Get Started", dashboardUrl)}
   `),
 });
+
+// ─── 6. OTP Email (email verification + password reset) ─────────────────────
+const otpCodeBox = (code: string) => `
+  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
+    <p style="margin:0 0 8px;color:#6b7280;font-size:13px;letter-spacing:1px;text-transform:uppercase;">Your One-Time Code</p>
+    <p style="margin:0;color:#4f46e5;font-size:38px;font-weight:800;letter-spacing:12px;font-family:monospace;">${code}</p>
+  </div>
+`;
+
+export const otpEmail = ({
+  name,
+  code,
+  purpose,
+  expiresInMinutes = 10,
+}: {
+  name: string;
+  code: string;
+  purpose: "verification" | "password reset";
+  expiresInMinutes?: number;
+}) => {
+  const isVerification = purpose === "verification";
+  return {
+    subject: isVerification
+      ? `🔑 Verify your FileVault email`
+      : `🔐 Reset your FileVault password`,
+    html: baseTemplate(`
+      <h2 style="margin:0 0 8px;color:#111827;font-size:22px;font-weight:700;">
+        ${isVerification ? "Verify your email address" : "Reset your password"}
+      </h2>
+      <p style="margin:0 0 20px;color:#6b7280;font-size:15px;line-height:1.6;">
+        Hi <strong>${name}</strong>, use the code below to ${
+      isVerification
+        ? "confirm your email address and activate your FileVault account"
+        : "set a new password for your FileVault account"
+    }.
+      </p>
+      ${otpCodeBox(code)}
+      <p style="margin:0 0 4px;color:#6b7280;font-size:13px;line-height:1.6;">
+        ⏳ This code expires in <strong>${expiresInMinutes} minutes</strong>.
+      </p>
+      <p style="margin:0;color:#9ca3af;font-size:13px;line-height:1.6;">
+        If you didn't request this, you can safely ignore this email.
+      </p>
+    `),
+  };
+};

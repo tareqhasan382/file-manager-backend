@@ -1,18 +1,11 @@
-import express from "express";
+import { AuthUser } from "../auth";
+import { TenantDoc } from "../../models/Tenant";
 
 declare global {
   namespace Express {
     interface Request {
       user: AuthUser;
-      tenant?: Tenant;
-      //user?: Record<string, any>;
+      tenant?: TenantDoc;
     }
   }
 }
-
-  // user?: {
-      //   userId: string;
-      //   email: string;
-      //   role: string;
-      //   tenantId: string;
-      // }

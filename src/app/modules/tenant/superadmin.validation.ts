@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zodObjectId } from "../../../shared/zod/objectId";
 
 export const changePlanSchema = z.object({
   body: z.object({
@@ -7,12 +8,12 @@ export const changePlanSchema = z.object({
     }),
   }),
   params: z.object({
-    id: z.string().uuid("Invalid tenant ID"),
+    id: zodObjectId,
   }),
 });
 
 export const tenantParamSchema = z.object({
   params: z.object({
-    id: z.string().uuid("Invalid tenant ID"),
+    id: zodObjectId,
   }),
 });

@@ -1,7 +1,7 @@
 import { NextFunction, Response, Request } from "express";
 import httpStatus from "http-status";
 import { AppError } from "../../utils/app_error";
-import { prisma } from "../../lib/prisma";
+import { Tenant } from "../../models/Tenant";
 
 export const tenantMiddleware = async (
   req: Request,
@@ -9,15 +9,14 @@ export const tenantMiddleware = async (
   next: NextFunction
 ) => {
   const tenantId = req.user?.tenantId;
-//console.log("tenantId---------->",tenantId)
+
   if (!tenantId) {
     throw new AppError("Tenant not found", httpStatus.BAD_REQUEST);
   }
 
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-  });
-//console.log("tenant---------->",tenant)
+  // Soft-deleted tenants are filtered out automatically.
+  const tenant = await Tenant.findById(tenantId);
+
   if (!tenant) {
     throw new AppError("Tenant does not exist", httpStatus.NOT_FOUND);
   }
@@ -30,6 +29,6 @@ export const tenantMiddleware = async (
     );
   }
 
-  req.tenant = tenant; 
+  req.tenant = tenant;
   next();
 };

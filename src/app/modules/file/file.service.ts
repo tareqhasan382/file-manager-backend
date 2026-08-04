@@ -1,6 +1,9 @@
-import { prisma } from "../../../lib/prisma";
 import { AppError } from "../../../utils/app_error";
 import httpStatus from "http-status";
+import { Folder } from "../../../models/Folder";
+import { File } from "../../../models/File";
+import { Tenant } from "../../../models/Tenant";
+import { withTransaction } from "../../../utils/transaction";
 
 interface CreateFilePayload {
   name: string;
@@ -23,64 +26,77 @@ interface UpdateFilePayload {
 
 // ─── Create ────────────────────────────────────────────────────────────────────
 const createFile = async (payload: CreateFilePayload) => {
-  const { name, tenantId, folderId, path, size, mimeType, url, publicId } = payload;
-
-  // Check duplicate name in same folder
-  // const existing = await prisma.file.findFirst({
-  //   where: { name, tenantId, folderId: folderId ?? null },
-  // });
-
-  // if (existing) {
-  //   throw new AppError(
-  //     "File with this name already exists in the same location",
-  //     httpStatus.CONFLICT
-  //   );
-  // }
+  const { name, tenantId, folderId, path, size, mimeType, url, publicId } =
+    payload;
 
   // Validate folder belongs to same tenant
   if (folderId) {
-    const folder = await prisma.folder.findUnique({ where: { id: folderId } });
-    if (!folder || folder.tenantId !== tenantId) {
+    const folder = await Folder.findById(folderId).lean();
+    if (!folder || folder.tenantId.toString() !== tenantId) {
       throw new AppError("Folder not found", httpStatus.NOT_FOUND);
     }
   }
 
-  // Update tenant storage usage
-  await prisma.tenant.update({
-    where: { id: tenantId },
-    data: { storageUsed: { increment: size } },
+  // Duplicate name check (backed by compound index tenantId+name+folderId)
+  const existing = await File.findOne({
+    tenantId,
+    name,
+    folderId: folderId ? folderId : null,
+  })
+    .select("_id")
+    .lean();
+  if (existing) {
+    throw new AppError(
+      "File with this name already exists in the same location",
+      httpStatus.CONFLICT
+    );
+  }
+
+  // Atomic: charge storage + persist the file record together.
+  const file = await withTransaction(async (session) => {
+    await Tenant.updateOne(
+      { _id: tenantId },
+      { $inc: { storageUsed: size } },
+      { session }
+    );
+
+    const [created] = await File.create(
+      [
+        {
+          name,
+          size,
+          mimeType,
+          url,
+          publicId,
+          tenantId,
+          folderId: folderId ? folderId : null,
+          path,
+        },
+      ],
+      { session }
+    );
+
+    return created;
   });
 
-  const file = await prisma.file.create({
-    data: { name, size, mimeType, url, publicId, tenantId, folderId, path },
-    include: { folder: true },
-  });
-
-  return file;
+  return file.toJSON();
 };
 
 // ─── Get All (by tenant) ────────────────────────────────────────────────────────
 const getFiles = async (tenantId: string, folderId?: string) => {
-  const files = await prisma.file.findMany({
-    where: {
-      tenantId,
-      ...(folderId ? { folderId } : {}),
-    },
-    include: { folder: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const files = await File.find({
+    tenantId,
+    ...(folderId ? { folderId } : {}),
+  }).sort({ createdAt: -1 });
 
   return files;
 };
 
 // ─── Get Single ────────────────────────────────────────────────────────────────
 const getFileById = async (id: string, tenantId: string) => {
-  const file = await prisma.file.findUnique({
-    where: { id },
-    include: { folder: true },
-  });
+  const file = await File.findById(id);
 
-  if (!file || file.tenantId !== tenantId) {
+  if (!file || file.tenantId.toString() !== tenantId) {
     throw new AppError("File not found", httpStatus.NOT_FOUND);
   }
 
@@ -91,22 +107,22 @@ const getFileById = async (id: string, tenantId: string) => {
 const updateFile = async (payload: UpdateFilePayload) => {
   const { id, tenantId, ...updateData } = payload;
 
-  const file = await prisma.file.findUnique({ where: { id } });
+  const file = await File.findById(id).lean();
 
-  if (!file || file.tenantId !== tenantId) {
+  if (!file || file.tenantId.toString() !== tenantId) {
     throw new AppError("File not found", httpStatus.NOT_FOUND);
   }
 
   // Check duplicate name in same folder on rename
   if (updateData.name) {
-    const duplicate = await prisma.file.findFirst({
-      where: {
-        name: updateData.name,
-        tenantId,
-        folderId: file.folderId,
-        NOT: { id },
-      },
-    });
+    const duplicate = await File.findOne({
+      name: updateData.name,
+      tenantId,
+      folderId: file.folderId,
+      _id: { $ne: id },
+    })
+      .select("_id")
+      .lean();
 
     if (duplicate) {
       throw new AppError(
@@ -116,30 +132,33 @@ const updateFile = async (payload: UpdateFilePayload) => {
     }
   }
 
-  const updated = await prisma.file.update({
-    where: { id },
-    data: updateData,
-    include: { folder: true },
-  });
+  const updated = await File.findByIdAndUpdate(id, updateData, { new: true });
 
   return updated;
 };
 
-// ─── Delete ────────────────────────────────────────────────────────────────────
+// ─── Delete (soft) ─────────────────────────────────────────────────────────────
+// Atomic: release storage + soft-delete the record.
 const deleteFile = async (id: string, tenantId: string) => {
-  const file = await prisma.file.findUnique({ where: { id } });
+  const file = await File.findById(id).lean();
 
-  if (!file || file.tenantId !== tenantId) {
+  if (!file || file.tenantId.toString() !== tenantId) {
     throw new AppError("File not found", httpStatus.NOT_FOUND);
   }
 
-  // Decrease tenant storage usage
-  await prisma.tenant.update({
-    where: { id: tenantId },
-    data: { storageUsed: { decrement: file.size } },
-  });
+  await withTransaction(async (session) => {
+    await Tenant.updateOne(
+      { _id: tenantId },
+      { $inc: { storageUsed: -file.size } },
+      { session }
+    );
 
-  await prisma.file.delete({ where: { id } });
+    await File.updateOne(
+      { _id: id, tenantId },
+      { $set: { deletedAt: new Date() } },
+      { session }
+    );
+  });
 
   return { message: "File deleted successfully" };
 };

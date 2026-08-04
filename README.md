@@ -24,7 +24,7 @@ A production-ready SaaS platform for secure, team-based file storage with role-b
 
 ## Overview
 
-FileVault is a multi-tenant file management SaaS where each organization (tenant) gets isolated storage, user management, and plan-based limits enforced at the API level. Built with Node.js, Prisma, PostgreSQL on the backend and React + Redux on the frontend.
+FileVault is a multi-tenant file management SaaS where each organization (tenant) gets isolated storage, user management, and plan-based limits enforced at the API level. Built with Node.js, Express, MongoDB + Mongoose on the backend and React + Redux on the frontend.
 
 ---
 
@@ -35,8 +35,8 @@ FileVault is a multi-tenant file management SaaS where each organization (tenant
 |-----------|---------|
 | Node.js + Express | REST API server |
 | TypeScript | Type safety |
-| Prisma ORM | Database access layer |
-| PostgreSQL | Primary database |
+| Mongoose | ODM / data access layer |
+| MongoDB (Atlas) | Primary database (replica set for transactions) |
 | Stripe | Subscription billing |
 | Cloudinary | File storage & CDN |
 | Nodemailer | Transactional emails |
@@ -78,7 +78,7 @@ FileVault is a multi-tenant file management SaaS where each organization (tenant
 
 ```bash
 Node.js >= 18
-PostgreSQL >= 14
+MongoDB >= 6 (replica set / Atlas for transactions)
 Stripe account
 Cloudinary account
 ```
@@ -95,11 +95,12 @@ npm install
 cp .env.example .env
 # Fill in all variables (see below)
 
-# Run migrations
-npx prisma migrate dev
+# Local MongoDB (optional; provides a replica set for transactions)
+docker compose up -d
+docker exec file-system-mongo mongosh --eval "rs.initiate()"
 
 # Seed SuperAdmin
-npx prisma db seed
+npm run seed
 
 # Start development server
 npm run dev
@@ -129,8 +130,8 @@ npm run dev
 ```env
 PORT=8000
 
-# Postgres
-DATABASE_URL="postgresql://postgres."
+# MongoDB (MONGODB_URI preferred; DATABASE_URL kept for compatibility)
+MONGODB_URI="mongodb+srv://<user>:<pass>@cluster.mongodb.net/saas-file-manager"
 #SUPER_ADMIN_USER
 SUPER_ADMIN_NAME=""
 SUPER_ADMIN_EMAIL=""
@@ -181,12 +182,36 @@ VITE_APP_preset_name=SassFileApp
 
 ## Database Schema
 
+MongoDB collections (Mongoose models in `src/models/`):
+
 ```
-Tenant         — Organization with plan, billing, ban status
-User           — Belongs to tenant, has role
-Folder         — Nested via self-relation (FolderTree)
-File           — Stored in Cloudinary, referenced in DB
+Tenant  — Organization with plan, billing, ban status
+User    — Belongs to tenant (ObjectId ref), has role
+Folder  — Nested via parentId self-reference (ObjectId)
+File    — Stored in Cloudinary, referenced in DB
 ```
+
+All collections use `ObjectId` references, automatic `createdAt`/`updatedAt`
+timestamps, and **soft delete** (`deletedAt`). Soft-deleted documents are
+excluded automatically by a shared Mongoose plugin.
+
+### Indexes
+
+| Collection | Index | Purpose |
+|-----------|-------|---------|
+| Tenant | `isBanned + plan` | SuperAdmin filtering |
+| Tenant | `stripeCustomerId` (unique, sparse) | Stripe linkage |
+| Tenant | `subscriptionId` (unique, sparse) | Webhook lookups |
+| User | `email` (unique) | Login |
+| User | `tenantId + role` | Member listing |
+| Folder | `tenantId + parentId + name` (unique, partial `deletedAt: null`) | Duplicate-name guard |
+| Folder | `tenantId + path` | Breadcrumb / API lookups |
+| File | `tenantId + folderId + createdAt` | Folder listing (hot path) |
+| File | `tenantId + name + folderId` | Duplicate-name guard |
+| File | `publicId` (unique, partial) | Cloudinary asset guard |
+
+Multi-document writes (registration, file create/delete storage accounting,
+downgrades) run inside **MongoDB transactions** via `withTransaction()`.
 
 ### Enums
 
@@ -272,10 +297,10 @@ Plan limits are enforced by `planValidation.middleware.ts` on every create reque
 
 ## Seeding SuperAdmin
 
-After running migrations, seed the SuperAdmin account:
+After connecting MongoDB, seed the SuperAdmin account:
 
 ```bash
-npx prisma db seed
+npm run seed
 ```
 
 This creates:

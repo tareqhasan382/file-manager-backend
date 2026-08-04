@@ -1,62 +1,34 @@
-// import { NextFunction, Request, Response } from 'express'
-// import httpStatus from 'http-status'
-// import { AppError } from '../../utils/app_error'
-// import { prisma } from '../../lib/prisma'
-
-// export const planMiddleware =
-//     (...allowedPlans: string[]) =>
-//         async (req: Request, res: Response, next: NextFunction) => {
-//             try {
-//                 let tenantId = req.user?.tenantId;
-
-//                 if (!tenantId) {
-//                     throw new AppError("Tenant not found", httpStatus.BAD_REQUEST);
-//                 }
-//                 const tenant = await prisma.tenant.findUnique({
-//                     where: { id: tenantId },
-//                 });
-
-//                 if (!tenant) {
-//                     throw new AppError("Tenant does not exist", httpStatus.NOT_FOUND);
-//                 }
-//                 if (!tenant.plan || !allowedPlans.includes(tenant.plan)) {
-//                     throw new AppError(
-//                         "Your current plan does not allow this action",
-//                         httpStatus.FORBIDDEN
-//                     );
-//                 }
-
-
-//                 next()
-//             } catch (error) {
-//                 next(error)
-//             }
-//         }
-
-import { Request,Response, NextFunction } from "express";
+import { NextFunction, Request, Response } from "express";
 import httpStatus from "http-status";
-import { prisma } from "../../lib/prisma";
+import { Types } from "mongoose";
+import { Tenant } from "../../models/Tenant";
+import { Folder } from "../../models/Folder";
+import { File } from "../../models/File";
 import { AppError } from "../../utils/app_error";
 import { PLAN_LIMITS, PlanType } from "../../config/planlimits";
-// import { PLAN_LIMITS, PlanType } from "../../config/planLimits";
-// import { AuthRequest } from "./auth.middleware";
 
-// ─── Helper: get folder depth ──────────────────────────────────────────────────
+/**
+ * Computes the depth of a folder in a single round-trip using `$graphLookup`.
+ * Replaces the previous N+1 "walk the parent chain" loop.
+ */
 const getFolderDepth = async (parentId: string): Promise<number> => {
-  let depth = 1;
-  let currentId: string | null = parentId;
+  const [result] = await Folder.aggregate<{ depth: number }>([
+    { $match: { _id: new Types.ObjectId(parentId), deletedAt: null } },
+    {
+      $graphLookup: {
+        from: "folders",
+        startWith: "$parentId",
+        connectFromField: "parentId",
+        connectToField: "_id",
+        as: "ancestors",
+        maxDepth: 50,
+        restrictSearchWithMatch: { deletedAt: null },
+      },
+    },
+    { $project: { depth: { $add: [{ $size: "$ancestors" }, 1] } } },
+  ]);
 
-  while (currentId) {
-    const result:any = await prisma.folder.findUnique({
-      where: { id: currentId },
-      select: { parentId: true },
-    });
-    if (!result || !result.parentId) break;
-    currentId = result.parentId;
-    depth++;
-  }
-
-  return depth;
+  return result ? result.depth : 1;
 };
 
 // ─── Validate File Upload ──────────────────────────────────────────────────────
@@ -67,19 +39,20 @@ export const validateFileUpload = async (
 ) => {
   try {
     const { tenantId } = req.user!;
-    const { size, folderId } = req.body;
+    const { size } = req.body;
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      include: { _count: { select: { files: true } } },
-    });
+    // Parallel reads: tenant + live file count (no N+1)
+    const [tenant, fileCount] = await Promise.all([
+      Tenant.findById(tenantId).lean(),
+      File.countDocuments({ tenantId }),
+    ]);
 
     if (!tenant) throw new AppError("Tenant not found", httpStatus.NOT_FOUND);
 
     const limits = PLAN_LIMITS[tenant.plan as PlanType];
 
     // 1. Max file count check
-    if (tenant._count.files >= limits.maxFiles) {
+    if (fileCount >= limits.maxFiles) {
       throw new AppError(
         `Your ${tenant.plan} plan allows maximum ${limits.maxFiles} files. Please upgrade your plan.`,
         httpStatus.FORBIDDEN
@@ -112,24 +85,24 @@ export const validateFolderCreate = async (
     const { tenantId } = req.user!;
     const { parentId } = req.body;
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      include: { _count: { select: { folders: true } } },
-    });
+    const [tenant, folderCount] = await Promise.all([
+      Tenant.findById(tenantId).lean(),
+      Folder.countDocuments({ tenantId }),
+    ]);
 
     if (!tenant) throw new AppError("Tenant not found", httpStatus.NOT_FOUND);
 
     const limits = PLAN_LIMITS[tenant.plan as PlanType];
 
     // 1. Max folder count check
-    if (tenant._count.folders >= limits.maxFolders) {
+    if (folderCount >= limits.maxFolders) {
       throw new AppError(
         `Your ${tenant.plan} plan allows maximum ${limits.maxFolders} folders. Please upgrade your plan.`,
         httpStatus.FORBIDDEN
       );
     }
 
-    // 2. Folder depth check
+    // 2. Folder depth check (single $graphLookup query)
     if (parentId) {
       const depth = await getFolderDepth(parentId);
       if (depth >= limits.maxFolderDepth) {

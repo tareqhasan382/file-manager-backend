@@ -5,7 +5,9 @@ dotenv.config({ path: Path.join(process.cwd(), ".env") });
 export default {
   env: process.env.NODE_ENV,
   port: process.env.PORT,
-  database_url: process.env.DATABASE_URL,
+  // MongoDB connection string (MONGODB_URI preferred, DATABASE_URL kept for
+  // backwards compatibility with the old PostgreSQL env setup)
+  mongodb_uri: process.env.MONGODB_URI || process.env.DATABASE_URL,
   bycrypt_salt_rounds: process.env.BCRYPT_SALT_ROUNDS,
   frontend_url: process.env.FRONTEND_URL,
   jwt: {

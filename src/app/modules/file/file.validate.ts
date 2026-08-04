@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zodObjectId, zodObjectIdOptional } from "../../../shared/zod/objectId";
 
 export const uploadFileSchema = z.object({
   body: z.object({
@@ -7,7 +8,7 @@ export const uploadFileSchema = z.object({
     mimeType: z.string().min(1, "Mime type is required"),
     url: z.string().url("Invalid URL"),
     publicId: z.string().min(1, "Public ID is required"),
-    folderId: z.string().uuid("Invalid folder ID").optional(),
+    folderId: zodObjectIdOptional,
     path: z.string().min(1, "Path is required"),
   }),
 });
@@ -15,16 +16,16 @@ export const uploadFileSchema = z.object({
 export const updateFileSchema = z.object({
   body: z.object({
     name: z.string().min(1).max(255).optional(),
-    folderId: z.string().uuid().optional(),
+    folderId: zodObjectIdOptional,
     path: z.string().optional(),
   }),
   params: z.object({
-    id: z.string().uuid("Invalid file ID"),
+    id: zodObjectId,
   }),
 });
 
 export const fileParamSchema = z.object({
   params: z.object({
-    id: z.string().uuid("Invalid file ID"),
+    id: zodObjectId,
   }),
 });
