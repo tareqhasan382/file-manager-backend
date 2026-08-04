@@ -255,38 +255,200 @@ const getAllUsers = async () => {
 };
 
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
+const PLAN_PRICES: Record<string, number> = {
+  FREE: 0,
+  SILVER: 500,
+  GOLD: 1500,
+  DIAMOND: 4900,
+};
+
+const lastNDays = (n: number) =>
+  new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
 const getStats = async () => {
-  const [tenantAgg, totalFiles, totalUsers] = await Promise.all([
+  const [
+    tenantAgg,
+    totalFiles,
+    userAgg,
+    billingAgg,
+  ] = await Promise.all([
     Tenant.aggregate([
       { $match: { deletedAt: null } },
       {
         $facet: {
           totalTenants: [{ $count: "count" }],
           bannedTenants: [{ $match: { isBanned: true } }, { $count: "count" }],
-          planBreakdown: [
-            { $group: { _id: "$plan", count: { $sum: 1 } } },
+          planBreakdown: [{ $group: { _id: "$plan", count: { $sum: 1 } } }],
+          totalStorage: [{ $group: { _id: null, total: { $sum: "$storageUsed" } } }],
+          signupsLast7: [
+            { $match: { createdAt: { $gte: lastNDays(7) } } },
+            { $count: "count" },
+          ],
+          signupsLast30: [
+            { $match: { createdAt: { $gte: lastNDays(30) } } },
+            { $count: "count" },
+          ],
+          signupTrend: [
+            { $match: { createdAt: { $gte: lastNDays(30) } } },
+            {
+              $group: {
+                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+          recentSignups: [
+            { $sort: { createdAt: -1 } },
+            { $limit: 6 },
+            {
+              $project: {
+                _id: 0,
+                id: { $toString: "$_id" },
+                name: 1,
+                plan: 1,
+                subscriptionStatus: 1,
+                isBanned: 1,
+                createdAt: 1,
+              },
+            },
           ],
         },
       },
     ]),
-    File.countDocuments({}),
-    User.countDocuments({ role: { $ne: "SUPER_ADMIN" } }),
+    File.countDocuments({ deletedAt: null }),
+    User.aggregate([
+      { $match: { deletedAt: null } },
+      {
+        $facet: {
+          totalUsers: [{ $match: { role: { $ne: "SUPER_ADMIN" } } }, { $count: "count" }],
+          roleBreakdown: [{ $group: { _id: "$role", count: { $sum: 1 } } }],
+        },
+      },
+    ]),
+    Billing.aggregate([
+      {
+        $facet: {
+          totalRevenue: [
+            {
+              $match: {
+                status: { $in: [BillingStatus.PAID, BillingStatus.COMPLETED] },
+                type: BillingType.PAYMENT,
+              },
+            },
+            { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
+          ],
+          activePlanSubscriptions: [
+            {
+              $match: {
+                status: BillingStatus.ACTIVE,
+                type: BillingType.SUBSCRIPTION,
+                stripeSubscriptionId: { $ne: null },
+              },
+            },
+            {
+              $group: {
+                _id: "$stripeSubscriptionId",
+                plan: { $last: "$plan" },
+              },
+            },
+          ],
+          failedPayments: [{ $match: { status: BillingStatus.FAILED } }, { $count: "count" }],
+          pendingCheckouts: [
+            {
+              $match: {
+                status: BillingStatus.PENDING,
+                type: BillingType.CHECKOUT,
+              },
+            },
+            { $count: "count" },
+          ],
+          revenueByPlan: [
+            {
+              $match: {
+                status: { $in: [BillingStatus.PAID, BillingStatus.COMPLETED] },
+                type: BillingType.PAYMENT,
+              },
+            },
+            { $group: { _id: "$plan", total: { $sum: "$amount" } } },
+          ],
+          revenueTrend: [
+            {
+              $match: {
+                status: { $in: [BillingStatus.PAID, BillingStatus.COMPLETED] },
+                type: BillingType.PAYMENT,
+                createdAt: { $gte: lastNDays(30) },
+              },
+            },
+            {
+              $group: {
+                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                amount: { $sum: "$amount" },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+        },
+      },
+    ]),
   ]);
 
-  const data = tenantAgg[0] || {};
-  const totalTenants = data.totalTenants[0]?.count ?? 0;
-  const bannedTenants = data.bannedTenants[0]?.count ?? 0;
+  const t = tenantAgg[0] || {};
+  const u = userAgg[0] || {};
+  const b = billingAgg[0] || {};
+
+  const totalTenants = t.totalTenants?.[0]?.count ?? 0;
+  const bannedTenants = t.bannedTenants?.[0]?.count ?? 0;
+  const totalStorage = t.totalStorage?.[0]?.total ?? 0;
+  const totalUsers = u.totalUsers?.[0]?.count ?? 0;
+
+  const activeSubscriptions = (b.activePlanSubscriptions || []).length;
+  const mrr = (b.activePlanSubscriptions || []).reduce(
+    (sum: number, s: any) => sum + (PLAN_PRICES[s.plan] ?? 0),
+    0
+  );
+
+  // Build dense 30-day series (zero-fill missing days) for the charts.
+  const days: string[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  const aggToSeries = (rows: any[], key: string) => {
+    const map = new Map(rows.map((r) => [r._id, r[key]]));
+    return days.map((date) => ({ date: date.slice(5), value: map.get(date) ?? 0 }));
+  };
 
   return {
     totalTenants,
-    bannedTenants,
     activeTenants: totalTenants - bannedTenants,
+    bannedTenants,
     totalUsers,
     totalFiles,
-    planBreakdown: (data.planBreakdown || []).map((p: any) => ({
+    totalStorage,
+    mrr,
+    totalRevenue: b.totalRevenue?.[0]?.total ?? 0,
+    paidPayments: b.totalRevenue?.[0]?.count ?? 0,
+    activeSubscriptions,
+    failedPayments: b.failedPayments?.[0]?.count ?? 0,
+    pendingCheckouts: b.pendingCheckouts?.[0]?.count ?? 0,
+    signupsLast7: t.signupsLast7?.[0]?.count ?? 0,
+    signupsLast30: t.signupsLast30?.[0]?.count ?? 0,
+    planBreakdown: (t.planBreakdown || []).map((p: any) => ({
       plan: p._id,
       count: p.count,
     })),
+    roleBreakdown: (u.roleBreakdown || []).map((r: any) => ({
+      role: r._id,
+      count: r.count,
+    })),
+    revenueByPlan: (b.revenueByPlan || []).map((p: any) => ({
+      plan: p._id,
+      amount: p.total,
+    })),
+    signupTrend: aggToSeries(t.signupTrend || [], "count"),
+    revenueTrend: aggToSeries(b.revenueTrend || [], "amount"),
+    recentSignups: t.recentSignups || [],
   };
 };
 

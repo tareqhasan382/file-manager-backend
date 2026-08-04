@@ -1,4 +1,5 @@
 import express from "express";
+import { authLimiter } from "../middlewares/rateLimit.middleware";
 import authRoute from "../modules/auth/auth.route";
 import billingRoute from "../modules/billing/billing.route";
 import folderRoute from "../modules/folder/folder.route";
@@ -9,7 +10,7 @@ import superAdminRoute from "../modules/tenant/superadmin.route";
 
 const router = express.Router();
 router.use("/admin", superAdminRoute);
-router.use("/auth", authRoute);
+router.use("/auth", authLimiter, authRoute);
 router.use("/user",userRoute);
 router.use("/tenant/members", memberRoute);
 router.use("/billing",billingRoute );

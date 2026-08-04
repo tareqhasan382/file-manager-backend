@@ -3,6 +3,7 @@ import cors from "cors";
 import router from "./app/routes";
 import notFound from "./app/middlewares/notFound";
 import { globalErrorHandler } from "./app/middlewares/error.middleware";
+import { apiLimiter } from "./app/middlewares/rateLimit.middleware";
 import { stripeWebhook } from "./app/modules/billing/stripe.webhook";
 
 const app: Application = express();
@@ -28,7 +29,7 @@ app.use(express.urlencoded({ extended: true }));
 
 /* -------------------- Routes -------------------- */
 
-app.use("/api/v1", router);
+app.use("/api/v1", apiLimiter, router);
 
 /* -------------------- Health -------------------- */
 app.get("/api/v1/health", (req, res) => {

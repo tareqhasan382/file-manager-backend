@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authControllers } from "./auth.controller";
 import validateRequest from "../../middlewares/validateRequest";
 import { authMiddleware } from "../../middlewares/auth.middleware";
+import { loginLimiter } from "../../middlewares/rateLimit.middleware";
 import {
   registerSchema,
   loginSchema,
@@ -13,7 +14,7 @@ import {
 
 const authRoute = Router();
 authRoute.post("/signup", validateRequest(registerSchema), authControllers.register);
-authRoute.post("/sigin", validateRequest(loginSchema), authControllers.login);
+authRoute.post("/sigin", loginLimiter, validateRequest(loginSchema), authControllers.login);
 authRoute.post("/verify-otp", validateRequest(verifyOtpSchema), authControllers.verifyOtp);
 authRoute.post("/resend-otp", validateRequest(resendOtpSchema), authControllers.resendOtp);
 authRoute.post("/forgot-password", validateRequest(forgotPasswordSchema), authControllers.forgotPassword);
