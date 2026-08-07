@@ -1,5 +1,6 @@
 import express, { Application } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import router from "./app/routes";
 import notFound from "./app/middlewares/notFound";
 import { globalErrorHandler } from "./app/middlewares/error.middleware";
@@ -7,6 +8,25 @@ import { apiLimiter } from "./app/middlewares/rateLimit.middleware";
 import { stripeWebhook } from "./app/modules/billing/stripe.webhook";
 
 const app: Application = express();
+
+/* -------------------- Security Headers -------------------- */
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+        imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
+        connectSrc: ["'self'", "https://api.cloudinary.com"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
+);
 
 /* -------------------- CORS -------------------- */
 app.use(cors({

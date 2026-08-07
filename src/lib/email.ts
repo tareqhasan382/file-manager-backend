@@ -1,4 +1,8 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
+import type { CreateEmailOptions } from "resend";
+import config from "../config";
+
+const resend = new Resend(config.resend.apiKey);
 
 export async function sendEmail({
   to,
@@ -11,21 +15,24 @@ export async function sendEmail({
   text?: string;
   html?: string;
 }) {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+  if (!config.resend.apiKey) {
+    throw new Error("RESEND_API_KEY is not configured");
+  }
 
-  await transporter.sendMail({
-    from: `"FileVault" <${process.env.EMAIL_USER}>`,
+  const payload = {
+    from: config.resend.from,
     to,
     subject,
-    text,
-    html,
-  });
+    ...(html ? { html } : {}),
+    ...(text ? { text } : {}),
+  } as CreateEmailOptions;
+
+  const { data, error } = await resend.emails.send(payload);
+
+  if (error) {
+    throw new Error(error.message || "Failed to send email");
+  }
 
   console.log("<---------------------Send message successfully.---------------------->");
+  return data;
 }

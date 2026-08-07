@@ -38,5 +38,9 @@ export default {
       diamond: process.env.DIAMOND as string,
     },
   },
+  resend: {
+    apiKey: process.env.RESEND_API_KEY as string,
+    from: process.env.RESEND_FROM_EMAIL || "FileVault <onboarding@resend.dev>",
+  },
 
 };
