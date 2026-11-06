@@ -4,9 +4,9 @@
   "description": "Enterprise-grade multi-tenant SaaS File Management System",
   "main": "dist/index.js",
   "scripts": {
-    "start": "node init && node dist/index.js",
-    "build": "node init && tsc",
-    "dev": "node init && ts-node-dev --respawn src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn src/index.ts",
     "seed": "ts-node src/seed/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -27,7 +27,6 @@
     "micro": "^10.0.1",
     "mongoose": "^8.16.3",
     "multer": "^2.0.2",
-    "node-fetch": "^3.3.2",
     "resend": "^6.18.1",
     "stripe": "^20.4.0",
     "zod": "^4.3.6"
