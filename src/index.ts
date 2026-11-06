@@ -12,7 +12,7 @@ process.on("uncaughtException", (error) => {
 
 let server: Server;
 
-async function main() {
+async function main() { 
   try {
     // Connect to MongoDB (Atlas / replica set supports multi-doc transactions)
     await connectDB();
